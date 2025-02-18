@@ -1,0 +1,185 @@
+### StratTest + Research
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import pandas as pd
+from IPython.display import display 
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.clustering import AgglomorativeClustering
+
+symbols = [
+    "AAPL",  # Apple Inc.
+    "MSFT",  # Microsoft Corporation
+    "GOOGL", # Alphabet Inc. (Class A)
+    "AMZN",  # Amazon.com, Inc.
+    "META",  # Meta Platforms, Inc. (formerly Facebook)
+    "TSLA",  # Tesla, Inc.
+    "NVDA",  # NVIDIA Corporation
+    "AMD",   # Advanced Micro Devices, Inc.
+    "INTC",  # Intel Corporation
+    "QCOM",  # Qualcomm Incorporated
+    "CSCO",  # Cisco Systems, Inc.
+    "CMCSA", # Comcast Corporation
+    "ADBE",  # Adobe Inc.
+    "NFLX",  # Netflix, Inc.
+    "PYPL",  # PayPal Holdings, Inc.
+    "AMGN",  # Amgen Inc.
+    "GILD",  # Gilead Sciences, Inc.
+    "SBUX",  # Starbucks Corporation
+    "BKNG",  # Booking Holdings Inc.
+    "ADP",   # Automatic Data Processing, Inc.
+    "INTU",  # Intuit Inc.
+    "MU",    # Micron Technology, Inc.
+    "ISRG",  # Intuitive Surgical, Inc.
+    "ATVI",  # Activision Blizzard, Inc.
+    "ILMN",  # Illumina, Inc.
+    "TXN",   # Texas Instruments Incorporated
+    "REGN",  # Regeneron Pharmaceuticals, Inc.
+    "BIDU",  # Baidu, Inc.
+    "EXPE",  # Expedia Group, Inc.
+    "LRCX",  # Lam Research Corporation
+    "KLAC",  # KLA Corporation
+    "MRVL",  # Marvell Technology Group Ltd.
+    "SWKS",  # Skyworks Solutions, Inc.
+    "CDNS",  # Cadence Design Systems, Inc.
+    "SPLK",  # Splunk Inc.
+    "TEAM",  # Atlassian Corporation Plc
+    "WDAY",  # Workday, Inc.
+    "DOCU",  # DocuSign, Inc.
+    "ZM",    # Zoom Video Communications, Inc.
+    "CRWD",  # CrowdStrike Holdings, Inc.
+    "OKTA",  # Okta, Inc.
+    "NET",   # Cloudflare, Inc.
+    "DDOG",  # Datadog, Inc.
+    "SNOW",  # Snowflake Inc.
+    "FISV",  # Fiserv, Inc.
+    "VRSN",  # Verisign, Inc.
+    "MCHP",  # Microchip Technology Inc.
+    "CTSH",  # Cognizant Technology Solutions Corporation
+    "SIRI",  # Sirius XM Holdings Inc.
+    "BMRN"   # BioMarin Pharmaceutical Inc.
+]
+
+startdate = datetime(2023, 1, 1)
+enddate = datetime(2024, 1, 1)
+qb = QuantBook()
+for symbol in symbols:
+    sym = qb.add_equity(symbol) ## Equities iteratively added
+    history = qb.history(qb.securities.keys(), startdate, enddate, Resolution.DAILY).close
+
+plt.figure(figsize = (6, 3))
+history.iloc[:250].plot() ## 1 year = 250 trading days
+plt.show()
+#### Stock Selection (Coarse + Fine)
+can't do Universe Selection for now
+
+# ----------------------------
+# Coarse Selection Function
+# ----------------------------
+def coarse_selection(coarse):
+    """
+    Filter the coarse fundamental data by:
+      - Ensuring the symbol has fundamental data
+      - Price > $5
+      - DollarVolume > $1 million
+    """
+    selected = [x.Symbol for x in coarse 
+                if x.HasFundamentalData and 
+                   x.Price > 5 and 
+                   x.DollarVolume > 1e6]
+    
+    symbols_count["CoarseSelected"] = len(selected)
+    print(f"Coarse Selection: {symbols_count['CoarseSelected']} symbols selected.")
+    return selected
+
+# ----------------------------
+# Fine Selection Function
+# ----------------------------
+def fine_selection(fine):
+    """
+    Further filter the fine fundamental data by:
+      - MarketCap > 500M
+      - BasicAverageShares (3 months) > 5M
+      - PERatio between 0 and 100
+      - PBRatio between 0 and 10
+      - ROE > 0 (using a fallback of 0 if data is missing)
+      - A valid MorningstarSectorCode (not 0)
+    
+    Also, check that there is sufficient historical data (at least `lookbackDays` daily bars)
+    """
+    # Apply fine fundamental filters
+    fine_filtered = [x for x in fine if 
+                     x.MarketCap > 5e8 and
+                     x.EarningReports.BasicAverageShares.ThreeMonths > 5e6 and
+                     (x.ValuationRatios.PERatio > 0 and x.ValuationRatios.PERatio < 100) and
+                     (x.ValuationRatios.PBRatio > 0 and x.ValuationRatios.PBRatio < 10) and
+                     ((x.OperationRatios.ROE.Value if x.OperationRatios.ROE.Value is not None else 0) > 0) and
+                     (x.AssetClassification.MorningstarSectorCode != 0)]
+    
+    # List to hold symbols with sufficient history
+    fine_selected = []
+    for x in fine_filtered:
+        # Retrieve historical price data for the symbol over the defined lookback period
+        history = qb.History([x.Symbol], lookbackDays, Resolution.Daily)
+        
+        # Ensure the history is not empty and has sufficient data
+        if not history.empty and len(history) >= lookbackDays:
+            fine_selected.append(x.Symbol)
+    
+    symbols_count["FineSelected"] = len(fine_selected)
+    print(f"Fine Selection: {symbols_count['FineSelected']} symbols selected.")
+    return fine_selected
+qb.universe_settings.Resolution = Resolution.Daily
+qb.add_universe(coarse_selection, fine_selection)
+
+symbols = list(qb.active_securities.keys)
+print(symbols)
+
+history = qb.history(symbols, startdate, enddate)
+
+display(history)
+print(len(history))
+### Manual Universe Selection -> PCA -> Clustering -> Cointegration -> Positioning  
+##### Manual Universe Selection
+print('Universe-Selected (Manual)')
+print()
+print(', '.join(symbols[:10]), ' ...')
+history = np.array(history).reshape(len(symbols), -1)
+print(history.shape)
+plt.figure(figsize = (6, 3))
+## 1 year = 250 trading days
+
+plt.plot(history[0], color='black')
+plt.title('AAPL-Close (1Y)')
+plt.show()
+pe_arr, pb_arr = [], []
+maxx = 0
+for symbol in symbols:
+    fundamentals = qb.History[Fundamental](symbol, startdate, enddate)
+    for fundamental in fundamentals:
+        pe_ratio = fundamental.ValuationRatios.PERatio
+        pb_ratio = fundamental.ValuationRatios.PBRatio
+        pe_arr.append(pe_ratio)
+        pb_arr.append(pb_ratio)
+    maxx += 250 
+    pe_arr = pe_arr[:maxx]
+    pb_arr = pb_arr[:maxx]
+
+pe_arr, pb_arr = np.array(pe_arr).reshape(len(symbols), -1), np.array(pb_arr).reshape(len(symbols), -1)
+print(pe_arr.shape, pb_arr.shape)
+df_temp = pd.DataFrame(history.T)
+pc_return = df_temp.pct_change().T.to_numpy()
+
+print(pc_return.shape)
+stock_df = pd.DataFrame(np.concatenate([pe_arr, pb_arr, pc_return], axis = -1)).fillna(0)
+print('Stock-Len: ', len(stock_df))
+display(stock_df.head(5))
+
+stock_data = stock_df.to_numpy()
+print(stock_data.shape)
+scaler = StandardScaler()
+scaled_stock_data = scalescaler.fit_transform(stock_data)
+
+pca = PCA()
+pca_stock_data = pca.fit_transform()
