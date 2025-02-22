@@ -1,6 +1,7 @@
 import pandas
 from statsmodels.tsa.stattools import coint
 import numpy as np
+import pandas as pd
 
 def SelectCointegratedPairs(symbols, cluster_labels, history, hurst_threshold = 0.5):
         
