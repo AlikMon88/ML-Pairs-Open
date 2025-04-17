@@ -81,7 +81,7 @@ class CointegratedPairsTradingStrategy(QCAlgorithm):
                             x.EarningReports.BasicAverageShares.ThreeMonths > 5e6 and  # Reduced minimum shares filter
                             x.ValuationRatios.PERatio > 0 and x.ValuationRatios.PERatio < 100 and  # Loosened P/E
                             x.ValuationRatios.PBRatio > 0 and x.ValuationRatios.PBRatio < 10 and  # Loosened P/B
-                            (x.OperationRatios.ROE.Value if x.OperationRatios.ROE.Value is not None else 0) > 0 and  # Loosened ROE to >0
+                            (x.OperationRatios.ROE.Value if x.OperationRatios.ROE.Value is not None else 0) > 0 and  # Loosened ROE to > 0
                             x.AssetClassification.MorningstarSectorCode != 0]  # Ensure valid sector code
         
         # Ensure sufficient history is available

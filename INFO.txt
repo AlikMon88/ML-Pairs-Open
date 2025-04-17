@@ -1,0 +1,2 @@
+NEED:
+Download recent data (~5 years) in .csv before LSEG access expires
