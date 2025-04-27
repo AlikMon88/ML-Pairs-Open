@@ -7,14 +7,6 @@ from statsmodels.regression.linear_model import OLS
 import statsmodels.api as sm
 
 
-
-# class Backtest():
-#     def __init__(self):
-#         pass
-
-#     def tester(self):
-#         pass
-
 class Backtest:
     def __init__(self, data, strategy, initial_capital=1000, commission=0.001, name='Default'):
         """

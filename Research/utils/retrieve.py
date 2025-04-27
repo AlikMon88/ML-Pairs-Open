@@ -8,6 +8,7 @@ def _manual_universe_creation():
                "PYPL.OQ", "SBUX.OQ", "INTU.OQ", "TEAM.OQ", "BIDU.OQ", "EXPE.OQ"]
     return tickers
 
+### Sector-wise? Return ordering based on internal ref listing 
 def _call_stocks(limit = 30, is_nasdaq = False):
     sp500_constituents = rd.get_data(
         universe=["0#.SPX"],  # Chain RIC for S&P 500 constituents
