@@ -8,33 +8,28 @@ Agglomerative clustering is a bottom-up hierarchical clustering method where eac
 ## 2. Key Concepts
 
 - **Distance Metrics**:
-  - Euclidean Distance:  
-    $$
-    d(x, y) = \sqrt{\sum_{i=1}^n (x_i - y_i)^2}
-    $$
+  - **Euclidean Distance**:  
+    `d(x, y) = sqrt(sum_i (xᵢ - yᵢ)²)`
 
 - **Linkage Criteria**:
   - **Single Linkage**: Minimum distance between points.
   - **Complete Linkage**: Maximum distance between points.
   - **Average Linkage**: Average distance between all points.
-  - **Ward's Method**: Minimize variance between clusters:
+  - **Ward's Method**: Minimize variance between clusters:  
+    `D(A, B) = (|A| * |B|) / (|A| + |B|) * ||mean(x_A) - mean(x_B)||²`
 
-    $$
-    D(A, B) = \frac{|A||B|}{|A| + |B|} \| \bar{x}_A - \bar{x}_B \|^2
-    $$
-
-- **Dendrogram**: Tree diagram showing the merging steps.
+- **Dendrogram**: A tree diagram showing the merging steps of the clusters.
 
 ---
 
 ## 3. Application in Pairs Trading
 
-- **Objective**: Group stocks with similar behaviors for pairs trading (cointegration, mean-reversion).
+- **Objective**: Group stocks with similar behaviors to find pairs exhibiting cointegration and mean-reversion characteristics.
 - **Steps**:
-  1. Calculate pairwise distances (e.g., $1 - \rho_{ij}$ correlation distance).
-  2. Perform agglomerative clustering.
-  3. Cut dendrogram at a threshold to form clusters.
-  4. Identify candidate stock pairs.
+  1. Calculate pairwise distances (e.g., `1 - correlation_ij` as a distance metric).
+  2. Perform agglomerative clustering based on a chosen linkage.
+  3. Cut the dendrogram at a threshold to form clusters.
+  4. Identify candidate stock pairs from clusters.
 
 ---
 
@@ -42,43 +37,34 @@ Agglomerative clustering is a bottom-up hierarchical clustering method where eac
 
 - **Algorithm**:
   1. Treat each observation as its own cluster.
-  2. Merge two closest clusters based on linkage.
-  3. Update the distance matrix.
-  4. Repeat until one cluster or threshold reached.
+  2. Merge two closest clusters based on the chosen linkage criterion.
+  3. Update the distance matrix after each merge.
+  4. Repeat until one cluster remains or a threshold is reached.
 
 - **Updating Distances**:
-  - Single Linkage:
-
-    $$
-    d(A \cup B, C) = \min(d(A,C), d(B,C))
-    $$
-
-  - Complete Linkage:
-
-    $$
-    d(A \cup B, C) = \max(d(A,C), d(B,C))
-    $$
-
-  - Average Linkage:
-
-    $$
-    d(A \cup B, C) = \frac{|A|d(A,C) + |B|d(B,C)}{|A|+|B|}
-    $$
+  - **Single Linkage**:  
+    `d(A ∪ B, C) = min(d(A,C), d(B,C))`
+  
+  - **Complete Linkage**:  
+    `d(A ∪ B, C) = max(d(A,C), d(B,C))`
+  
+  - **Average Linkage**:  
+    `d(A ∪ B, C) = (|A| * d(A,C) + |B| * d(B,C)) / (|A| + |B|)`
 
 ---
 
 ## 5. Advantages and Limitations
 
 - **Advantages**:
-  - No need to pre-specify number of clusters.
-  - Different distance/linkage flexibility.
+  - No need to pre-specify the number of clusters.
+  - Flexibility in choosing different distance metrics and linkage methods.
 
 - **Limitations**:
-  - Computationally expensive (O($n^3$)).
-  - Sensitive to noise and outliers.
+  - Computational complexity is high: `O(n³)`.
+  - Sensitive to noise and outliers, which may affect cluster stability.
 
 ---
 
-*References*:
-- Hastie, Tibshirani, Friedman (The Elements of Statistical Learning)
-- Murtagh, F. & Contreras, P. (Methods of Hierarchical Clustering)
+## References
+- Hastie, Tibshirani, Friedman — *The Elements of Statistical Learning*.
+- Murtagh, F. & Contreras, P. — *Methods of Hierarchical Clustering*.

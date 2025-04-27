@@ -12,6 +12,7 @@ For Theory Understanding --
 1. ```theory/fundamental_theory.md```
 2. ```theory/ML_clustering.md```
 3. ```theory/strat_high_level.md```
+4. ```docs/JC HULL - Options, Futures and Other Derivatives.md```
 
 ----
 

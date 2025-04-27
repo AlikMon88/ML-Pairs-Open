@@ -9,69 +9,53 @@ A **beta-neutral** (or market-neutral) portfolio aims to isolate alpha (idiosync
 
 - **Beta ($\beta$)**: Measures an asset’s sensitivity to market movements. For asset $i$:
 
-  $$
-  \beta_i = \frac{\mathrm{Cov}(r_i, r_m)}{\mathrm{Var}(r_m)}
-  $$
+  `βᵢ = Cov(rᵢ, rₘ) / Var(rₘ)`
 
-  where $r_i$ is the return of asset $i$, and $r_m$ is the market return.
+  where $rᵢ$ is the return of asset $i$, and $rₘ$ is the market return.
 
-- **Portfolio Beta ($\beta_p$)**: For $N$ assets with weights $w_i$:
+- **Portfolio Beta ($\beta_p$)**: For $N$ assets with weights $wᵢ$:
 
-  $$
-  \beta_p = \sum_{i=1}^N w_i \beta_i
-  $$
+  `βₚ = Σ(wᵢ * βᵢ)`
 
 - **Beta-Neutral Condition**:
 
-  $$
-  \beta_p = 0 \quad\Longrightarrow\quad \sum_{i=1}^N w_i \beta_i = 0
-  $$
+  `βₚ = 0  →  Σ(wᵢ * βᵢ) = 0`
 
-- **Alpha ($\alpha$)**: The intercept from the regression $r_{i,t} = \alpha + \beta_i r_{m,t} + \epsilon_t$, representing the asset’s return not explained by market movements.
+- **Alpha ($\alpha$)**: The intercept from the regression `rᵢ,t = α + βᵢ * rₘ,t + εₜ`, representing the asset’s return not explained by market movements.
 
-  $$
-  \alpha_i = E[r_i] - \beta_i E[r_m]
-  $$
+  `αᵢ = E[rᵢ] - βᵢ * E[rₘ]`
 
-- **Volatility ($\sigma$)**: The standard deviation of an asset’s returns, capturing total risk.
+- **Volatility ($σ$)**: The standard deviation of an asset’s returns, capturing total risk.
 
-  $$
-  \sigma_i = \sqrt{\mathrm{Var}(r_i)}
-  $$
+  `σᵢ = sqrt(Var(rᵢ))`
 
 - **Sharpe Ratio**: A measure of risk-adjusted return:
 
-  $$
-  \text{Sharpe} = \frac{E[r_p] - r_f}{\sigma_p}
-  $$
+  `Sharpe = (E[rₚ] - r_f) / σₚ`
 
   where $r_f$ is the risk-free rate.
 
 - **Systematic Risk**: The portion of an asset’s risk explained by market movements (i.e., determined by $\beta$).
 
-- **Unsystematic (Idiosyncratic) Risk**: The portion of an asset’s risk unique to the asset, not explained by market factors (the residual $\epsilon$).
+- **Unsystematic (Idiosyncratic) Risk**: The portion of an asset’s risk unique to the asset, not explained by market factors (the residual $ε$).
 
 ---
 
 ## 3. Constructing a Beta-Neutral Portfolio
 
 1. **Estimate Betas**
-   - Use time-series regression: $r_{i,t} = \alpha + \beta_i r_{m,t} + \epsilon_t$.
+   - Use time-series regression: `rᵢ,t = α + βᵢ * rₘ,t + εₜ`.
 
 2. **Determine Weights**
    - For a two-asset hedge (long asset 1, short asset 2):
 
-     $$
-     w_1 \beta_1 + w_2 \beta_2 = 0 \quad\Longrightarrow\quad w_2 = -w_1 \frac{\beta_1}{\beta_2}
-     $$
+     `w₁ * β₁ + w₂ * β₂ = 0  →  w₂ = -w₁ * (β₁ / β₂)`
 
-   - For multiple assets, solve:
+   - For multiple assets, solve the optimization problem:
 
-     $$
-     \min_w \; \frac{1}{2} w^T \Sigma w - \lambda \mu^T w \quad \text{s.t.} \quad \beta^T w = 0,\; \mathbf{1}^T w = 1
-     $$
+     `min_w  ½ * wᵀ * Σ * w - λ * μᵀ * w  s.t.  βᵀ * w = 0,  1ᵀ * w = 1`
 
-     where $\Sigma$ is the covariance matrix and $\mu$ is the expected return vector.
+     where `Σ` is the covariance matrix of asset returns, and `μ` is the expected returns vector.
 
 ---
 
@@ -79,23 +63,21 @@ A **beta-neutral** (or market-neutral) portfolio aims to isolate alpha (idiosync
 
 - **Portfolio Variance**:
 
-  $$
-  \sigma_p^2 = w^T \Sigma w
-  $$
+  `σₚ² = wᵀ * Σ * w`
 
-- **Value-at-Risk (VaR)** and **Conditional Value-at-Risk (CVaR)**:  
-  Evaluate risk on the P&L distribution after removing market exposure.
+- **Value-at-Risk (VaR)** and **Conditional Value-at-Risk (CVaR)**:
+  - Evaluate risk on the portfolio’s P&L distribution after removing market exposure.
 
 ---
 
 ## 5. Practical Considerations
 
-- **Estimation Error**: Beta estimates are noisy — use rolling windows/shrinkage.
-- **Leverage & Transaction Costs**: Beta-neutral portfolios often need leverage.
-- **Rebalancing**: Maintain neutrality with frequent rebalancing, but monitor turnover.
+- **Estimation Error**: Beta estimates are noisy — use rolling windows or shrinkage techniques.
+- **Leverage & Transaction Costs**: Beta-neutral portfolios often need leverage. Transaction costs must be considered during rebalancing.
+- **Rebalancing**: Frequent rebalancing is needed to maintain neutrality, but this can increase turnover and transaction costs.
 
 ---
 
-*References*:
-- Bodie, Kane & Marcus (Investments)
-- Korn & Korn (Option Pricing and Portfolio Optimization)
+## References:
+- Bodie, Kane & Marcus — *Investments*
+- Korn & Korn — *Option Pricing and Portfolio Optimization*
