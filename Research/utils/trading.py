@@ -81,3 +81,8 @@ class Trading:
         for symbol in prices:
             if symbol in self.portfolio.holdings:
                 self.portfolio.update(symbol, prices[symbol])
+
+
+
+if __name__ == '__main__':
+    print('running ...__trading.py__...')

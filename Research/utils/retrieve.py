@@ -1,4 +1,4 @@
-import refinitiv.data as rd
+# import refinitiv.data as rd
 import pandas as pd
 import numpy as np
 
