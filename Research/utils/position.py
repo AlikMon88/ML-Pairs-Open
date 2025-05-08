@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from .trading import Trading
-from .trading import Portfolio
 
 def CalculateMarketVolatility(benchmark_history, market_volatility = 0.0, market_volatility_window = 63): ### implied-volatility based on history --> approximating realised volatility
     

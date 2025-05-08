@@ -1,439 +1,446 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-class VolatilityWeightedPortfolioManager:
-    def __init__(self, history_provider, portfolio, broker):
-        """
-        Initialize the portfolio manager with history, portfolio and broker objects
+class SignalPortfolio:
+    def __init__(self, initial_amount, pairs, data_universe, market_data):
         
-        Args:
-            history_provider: Object to get historical price data
-            portfolio: Object containing portfolio information
-            broker: Object to execute trades
-        """
-        self.history_provider = history_provider
-        self.portfolio = portfolio
-        self.broker = broker
-        self.current_allocations = {}
-        self.portfolio_history = []
-        
-    def calculate_volatility(self, symbol, lookback_days=30):
-        """
-        Calculate historical volatility for a symbol
-        
-        Args:
-            symbol: The asset symbol
-            lookback_days: Number of days to use for volatility calculation
-            
-        Returns:
-            volatility: Annualized volatility
-        """
-        # Get historical daily prices
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=lookback_days * 1.5)  # Extra days for calculation
-        
-        history = self.history_provider.get_price_history(
-            symbol, 
-            start_date, 
-            end_date, 
-            resolution='daily'
-        )
-        
-        if history is None or len(history) < lookback_days:
-            raise ValueError(f"Insufficient price history for {symbol}")
-        
-        # Calculate daily returns
-        history['returns'] = history['close'].pct_change().dropna()
-        
-        # Calculate volatility (standard deviation of returns)
-        daily_volatility = history['returns'].tail(lookback_days).std()
-        
-        # Annualize volatility (assuming 252 trading days)
-        annualized_volatility = daily_volatility * np.sqrt(252)
-        
-        return annualized_volatility
-    
-    def create_inverse_volatility_portfolio(self, symbols, max_allocation=0.30, min_allocation=0.05):
-        """
-        Create a portfolio weighted by inverse volatility
-        
-        Args:
-            symbols: List of symbols to include in portfolio
-            max_allocation: Maximum allocation to any single asset
-            min_allocation: Minimum allocation to include an asset
-            
-        Returns:
-            allocations: Dictionary of {symbol: allocation}
-        """
-        if not symbols:
-            return {}
-            
-        # Calculate volatility for each symbol
-        volatilities = {}
-        valid_symbols = []
-        
-        for symbol in symbols:
-            try:
-                vol = self.calculate_volatility(symbol)
-                volatilities[symbol] = vol
-                valid_symbols.append(symbol)
-            except Exception as e:
-                print(f"Error calculating volatility for {symbol}: {e}")
-        
-        if not valid_symbols:
-            return {}
-            
-        # Calculate inverse volatility
-        inverse_vols = {symbol: 1.0/vol for symbol, vol in volatilities.items()}
-        
-        # Calculate weights based on inverse volatility
-        total_inverse_vol = sum(inverse_vols.values())
-        weights = {symbol: inv_vol/total_inverse_vol for symbol, inv_vol in inverse_vols.items()}
-        
-        # Apply maximum and minimum allocation constraints
-        allocations = self._apply_allocation_constraints(weights, max_allocation, min_allocation)
-        
-        return allocations
-    
-    def _apply_allocation_constraints(self, weights, max_allocation, min_allocation):
-        """
-        Apply maximum and minimum allocation constraints
-        
-        Args:
-            weights: Initial weights dictionary
-            max_allocation: Maximum allocation to any single asset
-            min_allocation: Minimum allocation to include an asset
-            
-        Returns:
-            allocations: Adjusted allocation dictionary
-        """
-        # Apply maximum constraint and remove small allocations
-        filtered_weights = {}
-        excluded_weight = 0
-        
-        for symbol, weight in weights.items():
-            if weight > max_allocation:
-                filtered_weights[symbol] = max_allocation
-                excluded_weight += weight - max_allocation
-            elif weight < min_allocation:
-                excluded_weight += weight
-            else:
-                filtered_weights[symbol] = weight
-        
-        if not filtered_weights:
-            # If all weights were filtered out, use the original with just max constraint
-            filtered_weights = {s: min(w, max_allocation) for s, w in weights.items()}
-        
-        # Redistribute excluded weight
-        if excluded_weight > 0 and filtered_weights:
-            total_filtered_weight = sum(filtered_weights.values())
-            for symbol in filtered_weights:
-                # Proportionally redistribute excess weight
-                filtered_weights[symbol] += excluded_weight * (filtered_weights[symbol] / total_filtered_weight)
-        
-        # Normalize to ensure sum is 1.0
-        total_weight = sum(filtered_weights.values())
-        normalized_weights = {s: w/total_weight for s, w in filtered_weights.items()}
-        
-        return normalized_weights
-    
-    def create_equal_risk_contribution_portfolio(self, symbols, target_risk=0.10):
-        """
-        Create a portfolio where each asset contributes equal risk
-        
-        Args:
-            symbols: List of symbols to include in portfolio
-            target_risk: Target portfolio risk level (annualized volatility)
-            
-        Returns:
-            allocations: Dictionary of {symbol: allocation}
-        """
-        # This is a simplified implementation of ERC
-        # A full implementation would use optimization and correlation matrix
-        
-        # Calculate volatility for each symbol
-        volatilities = {}
-        for symbol in symbols:
-            try:
-                vol = self.calculate_volatility(symbol)
-                volatilities[symbol] = vol
-            except Exception as e:
-                print(f"Error calculating volatility for {symbol}: {e}")
-        
-        # Calculate weights (proportional to 1/volatility)
-        inv_vols = {symbol: 1.0/vol for symbol, vol in volatilities.items()}
-        total_inv_vol = sum(inv_vols.values())
-        weights = {symbol: inv_vol/total_inv_vol for symbol, inv_vol in inv_vols.items()}
-        
-        # Scale weights to match target risk (assuming no correlation)
-        port_vol = np.sqrt(sum([(weights[s]**2) * (volatilities[s]**2) for s in weights]))
-        scaling_factor = target_risk / port_vol
-        
-        scaled_weights = {s: w * scaling_factor for s, w in weights.items()}
-        
-        # If sum > 1.0, normalize
-        total_weight = sum(scaled_weights.values())
-        if total_weight > 1.0:
-            scaled_weights = {s: w/total_weight for s, w in scaled_weights.items()}
-            
-        return scaled_weights
-    
-    def apply_portfolio_allocations(self, allocations, tolerance=0.005):
-        """
-        Apply the calculated allocations to the portfolio
-        
-        Args:
-            allocations: Dictionary of {symbol: allocation}
-            tolerance: Small buffer to prevent unnecessary trades
-            
-        Returns:
-            orders: List of orders executed
-        """
-        if not allocations:
-            return []
-            
-        portfolio_value = self.portfolio.get_total_portfolio_value()
-        orders = []
-        
-        for symbol, target_pct in allocations.items():
-            # Get current position information
-            current_position = self.portfolio.get_position(symbol)
-            current_shares = current_position.quantity if current_position else 0
-            current_price = self.broker.get_last_price(symbol)
-            
-            if current_price <= 0:
-                print(f"Invalid price for {symbol}: {current_price}")
-                continue
-                
-            current_value = current_shares * current_price
-            current_pct = current_value / portfolio_value if portfolio_value > 0 else 0
-            
-            # Check if adjustment is within tolerance
-            if abs(current_pct - target_pct) <= tolerance:
-                continue
-                
-            # Calculate the value difference and required shares
-            target_value = portfolio_value * target_pct
-            value_difference = target_value - current_value
-            shares_to_trade = int(value_difference / current_price)
-            
-            # Execute the order if shares_to_trade is not zero
-            if shares_to_trade != 0:
-                # Positive: buy, Negative: sell
-                if shares_to_trade > 0:
-                    order_id = self.broker.place_market_order(symbol, shares_to_trade, "buy")
-                else:
-                    order_id = self.broker.place_market_order(symbol, abs(shares_to_trade), "sell")
-                
-                orders.append({
-                    'symbol': symbol,
-                    'order_id': order_id,
-                    'shares': shares_to_trade,
-                    'target_pct': target_pct
-                })
-                
-                # Update current allocations
-                self.current_allocations[symbol] = target_pct
-        
-        # Record portfolio state
-        self._record_portfolio_state(allocations)
-        
-        return orders
-    
-    def _record_portfolio_state(self, target_allocations):
-        """
-        Record current portfolio state for tracking
-        """
-        portfolio_value = self.portfolio.get_total_portfolio_value()
-        
-        portfolio_state = {
-            'timestamp': datetime.now(),
-            'portfolio_value': portfolio_value,
-            'cash': self.portfolio.get_cash(),
-            'positions': []
+        self.initial_amount = initial_amount
+        self.pairs = pairs
+        self.data_universe = data_universe  # dict of symbol: dataframe
+        self.market_data = market_data
+        self.returns = {}
+        self.weights = {}
+        self.adjusted_weights = {}
+        self.portfolio_returns = None
+        self.portfolio_cumulative_returns = None
+
+    def compute_daily_returns(self):
+        for pair, data in self.pairs.items():
+            self.returns[pair] = data['spread_series'].pct_change().dropna()
+
+    ### lower portfolio weightage to highly volatile assets (pair-spread based)
+    def compute_inverse_volatility_weights(self):
+        volatilities = {pair: np.std(ret) for pair, ret in self.returns.items()}
+        inv_vol = {pair: 1 / vol for pair, vol in volatilities.items()}
+        total_inv_vol = sum(inv_vol.values())
+        self.weights = {pair: inv_vol[pair] / total_inv_vol for pair in inv_vol}
+
+    def compute_beta(self, price_series):
+        asset_returns = price_series.pct_change().dropna()
+        market_returns = self.market_data.pct_change().dropna()
+        min_len = min(len(asset_returns), len(market_returns))
+        X = market_returns[-min_len:].values.reshape(-1, 1)
+        y = asset_returns[-min_len:].values
+        model = LinearRegression().fit(X, y)
+        return model.coef_[0]
+
+    def adjust_weights_for_beta_neutrality(self):
+        beta_x = {}
+        beta_y = {}
+
+        for pair, data in self.pairs.items():
+            px = self.data_universe[data['symbol_x']]['TRDPRC_1']
+            py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+            beta_x[pair] = self.compute_beta(px)
+            beta_y[pair] = self.compute_beta(py)
+
+        for pair, weight in self.weights.items():
+            hedge_ratio = self.pairs[pair]['hedge_ratio']
+            # Effective beta of the spread = beta_x - hedge * beta_y
+            beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
+            self.adjusted_weights[pair] = weight * beta_adj
+
+        total_weight = sum(abs(w) for w in self.adjusted_weights.values())
+        self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+
+    def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
+        dates = self.returns[list(self.returns.keys())[0]].index
+        self.portfolio_returns = pd.Series(0, index=dates)
+        position_tracker = {pair: 0 for pair in self.pairs}
+        z_scores = {}
+
+        for pair, data in self.pairs.items():
+            spread = data['spread_series']
+            z = (spread - data['spread_mean']) / data['spread_std']
+            z_scores[pair] = z.reindex(dates).fillna(0)
+
+        for t in range(1, len(dates)):
+            daily_return = 0
+            for pair in self.pairs:
+                z = z_scores[pair].iloc[t]
+                ret = self.returns[pair].iloc[t]
+                pos = position_tracker[pair]
+                weight = self.adjusted_weights[pair]
+
+                if pos == 0:
+                    if z > entry_z: ## Short spread (synthetic asset)
+                        position_tracker[pair] = -1
+                    elif z < -entry_z: ## Long spread (synthetic asset)
+                        position_tracker[pair] = 1
+                elif pos == 1 and z > -exit_z:
+                    position_tracker[pair] = 0
+                elif pos == -1 and z < exit_z:
+                    position_tracker[pair] = 0
+
+                daily_return += pos * weight * ret
+
+            self.portfolio_returns.iloc[t] = daily_return
+
+        self.portfolio_cumulative_returns = (1 + self.portfolio_returns).cumprod()
+        self.portfolio_value = self.portfolio_cumulative_returns * self.initial_amount
+
+    def evaluate_performance(self):
+        sharpe = self.portfolio_returns.mean() / self.portfolio_returns.std() * np.sqrt(252)
+        drawdown = (self.portfolio_cumulative_returns / self.portfolio_cumulative_returns.cummax() - 1).min()
+        return sharpe, drawdown
+
+    def plot_performance(self):
+        plt.figure(figsize=(8, 4))
+        plt.plot(self.portfolio_value, label="Portfolio")
+        plt.xlabel("Date")
+        plt.ylabel("Portfolio Value ($)")
+        plt.title("Beta-Neutral Signal-Based Portfolio")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_pair_signals(self, pair_name, entry_z=1.0, exit_z=0.2):
+        pair_data = self.pairs[pair_name]
+        spread = pair_data['spread_series']
+        mean = pair_data['spread_mean']
+        std = pair_data['spread_std']
+
+        z_score = (spread - mean) / std
+        position = 0
+        entries, exits = [], []
+
+        for t in range(1, len(z_score)):
+            z = z_score.iloc[t]
+
+            if position == 0:
+                if z > entry_z:
+                    entries.append((z_score.index[t], spread.iloc[t], 'short'))
+                    position = -1
+                elif z < -entry_z:
+                    entries.append((z_score.index[t], spread.iloc[t], 'long'))
+                    position = 1
+            elif position == 1 and z > -exit_z:
+                exits.append((z_score.index[t], spread.iloc[t]))
+                position = 0
+            elif position == -1 and z < exit_z:
+                exits.append((z_score.index[t], spread.iloc[t]))
+                position = 0
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(spread, label='Spread')
+        # plt.axhline(mean, color='gray', linestyle='--', label='Mean')
+        # plt.axhline(mean + entry_z * std, color='red', linestyle='--', label=f'+{entry_z}σ')
+        # plt.axhline(mean - entry_z * std, color='green', linestyle='--', label=f'-{entry_z}σ')
+        # plt.axhline(mean + exit_z * std, color='orange', linestyle=':', label=f'+{exit_z}σ exit')
+        # plt.axhline(mean - exit_z * std, color='orange', linestyle=':', label=f'-{exit_z}σ exit')
+
+        for dt, val, signal in entries:
+            plt.plot(dt, val, 'go' if signal == 'long' else 'ro', label=f'Entry ({signal})')
+        for dt, val in exits:
+            plt.plot(dt, val, 'kx', label='Exit')
+
+        plt.title(f'Trading Signals for Pair: {pair_name}')
+        plt.xlabel('Date')
+        plt.ylabel('Spread')
+        # plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def beta_neutral_check(self):
+        market_returns = self.market_data.pct_change().dropna()
+        min_len = min(len(self.portfolio_returns), len(market_returns))
+        X = market_returns[-min_len:].values.reshape(-1, 1)
+        y = self.portfolio_returns[-min_len:].values
+        model = LinearRegression().fit(X, y)
+        print('Portfolio-Beta: ', model.coef_[0])
+
+    def run(self):
+        self.compute_daily_returns()
+        self.compute_inverse_volatility_weights()
+        self.adjust_weights_for_beta_neutrality()
+        self.backtest_with_signals()
+        self.plot_performance()
+        sharpe, mdd = self.evaluate_performance()
+        print(f"Sharpe Ratio: {sharpe:.4f}")
+        print(f"Max Drawdown: {mdd:.2%}")
+        print(f"Portfolio Value: ${list(self.portfolio_value)[-1]:.2f}")
+        return {
+            'portfolio_value': list(self.portfolio_value)[-1],
+            'sharpe_ratio': sharpe,
+            'max_drawdown': mdd
         }
-        
-        # Record all positions
-        for symbol in set(list(target_allocations.keys()) + list(self.current_allocations.keys())):
-            position = self.portfolio.get_position(symbol)
-            
-            if position:
-                current_price = self.broker.get_last_price(symbol)
-                current_value = position.quantity * current_price
-                current_pct = current_value / portfolio_value if portfolio_value > 0 else 0
-                
-                vol = self.calculate_volatility(symbol)
-                
-                position_data = {
-                    'symbol': symbol,
-                    'quantity': position.quantity,
-                    'price': current_price,
-                    'value': current_value,
-                    'current_allocation': current_pct,
-                    'target_allocation': target_allocations.get(symbol, 0),
-                    'volatility': vol,
-                }
-                
-                portfolio_state['positions'].append(position_data)
-        
-        self.portfolio_history.append(portfolio_state)
-    
-    def get_current_portfolio_df(self):
-        """
-        Get current portfolio as a DataFrame
-        
-        Returns:
-            df: DataFrame with current portfolio information
-        """
-        if not self.portfolio_history:
-            return pd.DataFrame()
-            
-        current_state = self.portfolio_history[-1]
-        
-        # Create positions dataframe
-        positions_df = pd.DataFrame(current_state['positions'])
-        
-        if positions_df.empty:
-            return pd.DataFrame()
-            
-        # Add portfolio summary
-        positions_df['portfolio_value'] = current_state['portfolio_value']
-        positions_df['timestamp'] = current_state['timestamp']
-        positions_df['cash'] = current_state['cash']
-        positions_df['cash_allocation'] = current_state['cash'] / current_state['portfolio_value']
-        
-        # Calculate risk contribution (simplified)
-        if 'volatility' in positions_df.columns and 'current_allocation' in positions_df.columns:
-            positions_df['risk_contribution'] = positions_df['volatility'] * positions_df['current_allocation']
-            total_risk = positions_df['risk_contribution'].sum()
-            positions_df['risk_pct'] = positions_df['risk_contribution'] / total_risk if total_risk > 0 else 0
-        
-        return positions_df
-    
-    def get_portfolio_history_df(self):
-        """
-        Get historical portfolio data as a DataFrame
-        
-        Returns:
-            df: DataFrame with portfolio history
-        """
-        if not self.portfolio_history:
-            return pd.DataFrame()
-            
-        all_positions = []
-        
-        for state in self.portfolio_history:
-            for position in state['positions']:
-                position_data = {
-                    'timestamp': state['timestamp'],
-                    'portfolio_value': state['portfolio_value'],
-                    'cash': state['cash'],
-                    'symbol': position['symbol'],
-                    'quantity': position['quantity'],
-                    'price': position['price'],
-                    'value': position['value'],
-                    'allocation': position['current_allocation'],
-                    'target_allocation': position['target_allocation'],
-                    'volatility': position.get('volatility', None)
-                }
-                all_positions.append(position_data)
-        
-        return pd.DataFrame(all_positions)
-    
-    def export_portfolio_to_csv(self, filename=None):
-        """
-        Export current portfolio to CSV file
-        
-        Args:
-            filename: CSV filename, defaults to 'portfolio_{timestamp}.csv'
-            
-        Returns:
-            path: Path to saved file
-        """
-        if filename is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'portfolio_{timestamp}.csv'
-            
-        df = self.get_current_portfolio_df()
-        
-        if not df.empty:
-            df.to_csv(filename, index=False)
-            return filename
-        
-        return None
-    
-    def liquidate_all(self):
-        """
-        Liquidate all positions
-        
-        Returns:
-            orders: List of order IDs
-        """
-        order_ids = []
-        
-        for position in self.portfolio.get_positions():
-            if position.quantity != 0:
-                direction = "sell" if position.quantity > 0 else "buy"
-                order_id = self.broker.place_market_order(
-                    position.symbol, 
-                    abs(position.quantity), 
-                    direction
-                )
-                order_ids.append(order_id)
-        
-        # Clear current allocations
-        self.current_allocations = {}
-        
-        # Record portfolio state
-        self._record_portfolio_state({})
-        
-        return order_ids
 
-# # Example usage in a QC algorithm
-# class VolatilityWeightedAlgorithm:
-#     def Initialize(self):
-#         self.SetStartDate(2020, 1, 1)
-#         self.SetEndDate(2023, 1, 1)
-#         self.SetCash(100000)
+
+#### --------------------------------------------------------------------------------------------------------- ######
+#### --------------------------------------------------------------------------------------------------------- ######
+#### --------------------------------------------------------------------------------------------------------- ######
+
+
+class SignalPortfolioConstrained:
+    def __init__(self, initial_amount, pairs, data_universe, market_data):
+        self.initial_amount = initial_amount
+        self.pairs = pairs
+        self.data_universe = data_universe
+        self.market_data = market_data
+        self.returns = {}
+        self.weights = {}
+        self.adjusted_weights = {}
+        self.portfolio_returns = None
+        self.portfolio_cumulative_returns = None
+        self.portfolio_value = None
+        self.var_series = None
+        self.es_series = None
+
+    def compute_daily_returns(self):
+        for pair, data in self.pairs.items():
+            self.returns[pair] = data['spread_series'].pct_change().dropna()
+
+    def compute_inverse_volatility_weights(self):
+        volatilities = {pair: np.std(ret) for pair, ret in self.returns.items()}
+        inv_vol = {pair: 1 / vol for pair, vol in volatilities.items() if vol != 0}
+        total_inv_vol = sum(inv_vol.values())
+        self.weights = {pair: inv_vol[pair] / total_inv_vol for pair in inv_vol}
+
+    def compute_beta(self, price_series):
+        asset_returns = price_series.pct_change().dropna()
+        market_returns = self.market_data.pct_change().dropna()
+        min_len = min(len(asset_returns), len(market_returns))
+        X = market_returns[-min_len:].values.reshape(-1, 1)
+        y = asset_returns[-min_len:].values
+        model = LinearRegression().fit(X, y)
+        return model.coef_[0]
+
+    def adjust_weights_for_beta_neutrality(self):
+        beta_x = {}
+        beta_y = {}
+
+        for pair, data in self.pairs.items():
+            px = self.data_universe[data['symbol_x']]['TRDPRC_1']
+            py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+            beta_x[pair] = self.compute_beta(px)
+            beta_y[pair] = self.compute_beta(py)
+
+        for pair, weight in self.weights.items():
+            hedge_ratio = self.pairs[pair]['hedge_ratio']
+            beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
+            self.adjusted_weights[pair] = weight * beta_adj
+
+        total_weight = sum(abs(w) for w in self.adjusted_weights.values())
+        self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+
+    def apply_constraints(self, date):
+        constrained_weights = {}
+        gmv = self.initial_amount
+
+        for pair, weight in self.adjusted_weights.items():
+            data = self.pairs[pair]
+            x = data['symbol_x']
+            y = data['symbol_y']
+
+            # adv_x = self.adv_data.get(x, 1e9)
+            # adv_y = self.adv_data.get(y, 1e9)
+            
+            ### Average daily Volume ?? 
+            adv_x = np.mean(list(self.data_universe[x]['ACVOL_UNS']))
+            adv_y = np.mean(list(self.data_universe[y]['ACVOL_UNS']))
+            
+            max_trade_limit = 0.025 * min(adv_x, adv_y)
+            pos_limit = 0.025 * min(adv_x, adv_y)
+
+            position_value = abs(weight * gmv)
+            if position_value > pos_limit:
+                weight = np.sign(weight) * pos_limit / gmv
+
+            constrained_weights[pair] = weight
+
+        total = sum(abs(w) for w in constrained_weights.values())
+        return {pair: w / total for pair, w in constrained_weights.items()}
+
+    def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
+        dates = self.returns[list(self.returns.keys())[0]].index
+        self.portfolio_returns = pd.Series(0, index=dates)
+        position_tracker = {pair: 0 for pair in self.pairs}
+        z_scores = {}
+
+        for pair, data in self.pairs.items():
+            spread = data['spread_series']
+            z = (spread - data['spread_mean']) / data['spread_std']
+            z_scores[pair] = z.reindex(dates).fillna(0)
+
+        for t in range(1, len(dates)):
+            date = dates[t]
+            daily_return = 0
+            weights_today = self.apply_constraints(date)
+
+            for pair in self.pairs:
+                z = z_scores[pair].iloc[t]
+                ret = self.returns[pair].iloc[t]
+                pos = position_tracker[pair]
+                weight = weights_today[pair]
+
+                if pos == 0:
+                    if z > entry_z:
+                        position_tracker[pair] = -1
+                    elif z < -entry_z:
+                        position_tracker[pair] = 1
+                elif pos == 1 and z > -exit_z:
+                    position_tracker[pair] = 0
+                elif pos == -1 and z < exit_z:
+                    position_tracker[pair] = 0
+
+                holding_days = 1 / 252
+                execution_cost = 0.0002 * abs(pos * weight)
+                financing_cost = 0.005 * holding_days * abs(pos * weight)
+
+                daily_return += pos * weight * ret - execution_cost - financing_cost
+
+            self.portfolio_returns.iloc[t] = daily_return
+
+        self.portfolio_cumulative_returns = (1 + self.portfolio_returns).cumprod()
+        self.portfolio_value = self.portfolio_cumulative_returns * self.initial_amount
+
+    def evaluate_performance(self):
+        sharpe = self.portfolio_returns.mean() / self.portfolio_returns.std() * np.sqrt(252)
+        drawdown = (self.portfolio_cumulative_returns / self.portfolio_cumulative_returns.cummax() - 1).min()
+        return sharpe, drawdown
+
+    def compute_var_es(self, alpha=0.05):
+        if self.portfolio_returns is None:
+            raise ValueError("Run the backtest first to generate portfolio returns.")
         
-#         # Add symbols
-#         self.symbols = ['SPY', 'QQQ', 'TLT', 'GLD', 'VNQ']
-#         for symbol in self.symbols:
-#             self.AddEquity(symbol, Resolution.Daily)
-        
-#         # Create portfolio manager
-#         self.portfolio_manager = VolatilityWeightedPortfolioManager(
-#             history_provider=self,  # QC algorithm has history methods
-#             portfolio=self.Portfolio,
-#             broker=self
-#         )
-        
-#         # Schedule portfolio rebalancing
-#         self.Schedule.On(self.DateRules.MonthStart(), 
-#                          self.TimeRules.AfterMarketOpen('SPY'), 
-#                          self.Rebalance)
+        returns = self.portfolio_returns.dropna()
+        var_list = []
+        es_list = []
+
+        for i in range(len(returns)):
+            window = returns[max(0, i - 59): i + 1]
+            if len(window) < 10:
+                var_list.append(0)
+                es_list.append(0)
+                continue
+
+            sorted_returns = window.sort_values()
+            var = sorted_returns.quantile(alpha)
+            es = sorted_returns[sorted_returns <= var].mean()
+
+            var_list.append(var)
+            es_list.append(es)
+
+        self.var_series = pd.Series(var_list, index=returns.index)
+        self.es_series = pd.Series(es_list, index=returns.index)
+
+    def plot_var_es_curve(self, alpha=0.05, risk_limit=500_000):
+        if self.var_series is None or self.es_series is None:
+            self.compute_var_es(alpha)
+
+        var_usd = self.var_series * self.initial_amount
+        es_usd = self.es_series * self.initial_amount
+
+        plt.figure(figsize=(8, 4))
+        sns.lineplot(data=var_usd, label=f'VaR ({int((1 - alpha) * 100)}%)')
+        sns.lineplot(data=es_usd, label=f'Expected Shortfall ({int((1 - alpha) * 100)}%)')
+        plt.axhline(-risk_limit, color='red', linestyle='--', label=f'Risk Limit (${risk_limit:,.0f})')
+        plt.title('Value at Risk (VaR) and Expected Shortfall (ES) Over Time')
+        plt.ylabel('Potential Loss in USD')
+        plt.xlabel('Date')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_performance(self):
+        plt.figure(figsize=(8, 4))
+        plt.plot(self.portfolio_value, label="Portfolio")
+        plt.xlabel("Date")
+        plt.ylabel("Portfolio Value ($)")
+        plt.title("Beta-Neutral Signal-Based Portfolio")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_pair_signals(self, pair_name, entry_z=1.0, exit_z=0.2):
+        pair_data = self.pairs[pair_name]
+        spread = pair_data['spread_series']
+        mean = pair_data['spread_mean']
+        std = pair_data['spread_std']
+
+        z_score = (spread - mean) / std
+        position = 0
+        entries, exits = [], []
+
+        for t in range(1, len(z_score)):
+            z = z_score.iloc[t]
+
+            if position == 0:
+                if z > entry_z:
+                    entries.append((z_score.index[t], spread.iloc[t], 'short'))
+                    position = -1
+                elif z < -entry_z:
+                    entries.append((z_score.index[t], spread.iloc[t], 'long'))
+                    position = 1
+            elif position == 1 and z > -exit_z:
+                exits.append((z_score.index[t], spread.iloc[t]))
+                position = 0
+            elif position == -1 and z < exit_z:
+                exits.append((z_score.index[t], spread.iloc[t]))
+                position = 0
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(spread, label='Spread')
+        # plt.axhline(mean, color='gray', linestyle='--', label='Mean')
+        # plt.axhline(mean + entry_z * std, color='red', linestyle='--', label=f'+{entry_z}σ')
+        # plt.axhline(mean - entry_z * std, color='green', linestyle='--', label=f'-{entry_z}σ')
+        # plt.axhline(mean + exit_z * std, color='orange', linestyle=':', label=f'+{exit_z}σ exit')
+        # plt.axhline(mean - exit_z * std, color='orange', linestyle=':', label=f'-{exit_z}σ exit')
+
+        for dt, val, signal in entries:
+            plt.plot(dt, val, 'go' if signal == 'long' else 'ro', label=f'Entry ({signal})')
+        for dt, val in exits:
+            plt.plot(dt, val, 'kx', label='Exit')
+
+        plt.title(f'Trading Signals for Pair: {pair_name}')
+        plt.xlabel('Date')
+        plt.ylabel('Spread')
+        # plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def beta_neutral_check(self):
+        market_returns = self.market_data.pct_change().dropna()
+        min_len = min(len(self.portfolio_returns), len(market_returns))
+        X = market_returns[-min_len:].values.reshape(-1, 1)
+        y = self.portfolio_returns[-min_len:].values
+        model = LinearRegression().fit(X, y)
+        print('Portfolio-Beta: ', model.coef_[0])
+
+    def run(self):
+        self.compute_daily_returns()
+        self.compute_inverse_volatility_weights()
+        self.adjust_weights_for_beta_neutrality()
+        self.backtest_with_signals()
+        self.plot_performance()
+        sharpe, mdd = self.evaluate_performance()
+        print(f"Sharpe Ratio: {sharpe:.4f}")
+        print(f"Max Drawdown: {mdd:.2%}")
+        print(f"Portfolio Value: ${list(self.portfolio_value)[-1]:.2f}")
+        return {
+            'portfolio_value': list(self.portfolio_value)[-1],
+            'sharpe_ratio': sharpe,
+            'max_drawdown': mdd
+        }
     
-#     def OnData(self, data):
-#         # Main algorithm logic
-#         pass
-    
-#     def Rebalance(self):
-#         # Create inverse volatility portfolio
-#         allocations = self.portfolio_manager.create_inverse_volatility_portfolio(
-#             self.symbols,
-#             max_allocation=0.30,
-#             min_allocation=0.05
-#         )
-        
-#         # Apply the allocations
-#         orders = self.portfolio_manager.apply_portfolio_allocations(allocations)
-        
-#         # Log the portfolio
-#         portfolio_df = self.portfolio_manager.get_current_portfolio_df()
-#         self.Log(f"Portfolio rebalanced. Current allocations: {allocations}")
-        
-#         # Export to CSV (in live trading)
-#         if self.LiveMode:
-#             csv_path = self.portfolio_manager.export_portfolio_to_csv()
-#             self.Log(f"Portfolio exported to {csv_path}")
+
+if __name__ == '__main__':
+    print('running __portfolio.py__')

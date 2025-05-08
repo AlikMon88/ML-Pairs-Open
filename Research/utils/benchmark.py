@@ -5,13 +5,14 @@ from sklearn.linear_model import LinearRegression
 from IPython.display import display
 
 class BenchmarkPortfolio:
-    def __init__(self, pairs, data_universe, market_data):
+    def __init__(self, initial_amount, pairs, data_universe, market_data):
         """
         Args:
             pairs (dict): Dictionary of filtered cointegrated pairs with spread series, hedge ratio, etc.
             market_data (pd.Series): Market index price series.
             price_series_dict (dict): Dictionary with keys as tickers and values as pd.Series of price data.
         """
+        self.initial_amount = initial_amount
         self.pairs = pairs
         self.data_universe = data_universe
         self.market_data = market_data
@@ -67,8 +68,8 @@ class BenchmarkPortfolio:
             aligned_returns = self.returns[pair].reindex(dates).fillna(0)
             self.portfolio_returns += weight * aligned_returns
 
-        ## assumes you reinvest all profits each day into the portfolio
         self.portfolio_cumulative_returns = (1 + self.portfolio_returns).cumprod()
+        self.portfolio_value = self.portfolio_cumulative_returns * self.initial_amount
 
     def evaluate_performance(self):
         sharpe_ratio = self.portfolio_returns.mean() / self.portfolio_returns.std() * np.sqrt(252)
@@ -76,15 +77,23 @@ class BenchmarkPortfolio:
         return sharpe_ratio, max_drawdown
 
     def plot_performance(self):
-        plt.figure(figsize=(10, 6))
-        plt.plot(self.portfolio_cumulative_returns, label='Portfolio')
-        plt.title('Beta-Neutral, Inverse-Volatility Weighted Pairs Portfolio')
+        plt.figure(figsize=(8, 4))
+        plt.plot(self.portfolio_value, label='Portfolio Value (USD)')
+        plt.title('Beta-Neutral Portfolio (Benchmark)')
         plt.xlabel('Date')
-        plt.ylabel('Cumulative Returns')
+        plt.ylabel('Portfolio Value ($)')
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
         plt.show()
+
+    def beta_neutral_check(self):
+        market_returns = self.market_data.pct_change().dropna()
+        min_len = min(len(self.portfolio_returns), len(market_returns))
+        X = market_returns[-min_len:].values.reshape(-1, 1)
+        y = self.portfolio_returns[-min_len:].values
+        model = LinearRegression().fit(X, y)
+        print('Portfolio-Beta: ', model.coef_[0])
 
     def run(self):
         self.compute_daily_returns()
@@ -95,8 +104,9 @@ class BenchmarkPortfolio:
         sharpe_ratio, max_drawdown = self.evaluate_performance()
         print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
         print(f"Max Drawdown: {max_drawdown:.2%}")
+        print(f"Portfolio Value: ${list(self.portfolio_value)[-1]:.2f}")
         return {
-            'cumulative_returns': self.portfolio_cumulative_returns,
+            'portfolio_value': list(self.portfolio_value)[-1],
             'sharpe_ratio': sharpe_ratio,
             'max_drawdown': max_drawdown
         }
