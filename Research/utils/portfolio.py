@@ -3,6 +3,8 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.optimize import minimize
+
 
 class SignalPortfolio:
     def __init__(self, initial_amount, pairs, data_universe, market_data):
@@ -37,24 +39,73 @@ class SignalPortfolio:
         model = LinearRegression().fit(X, y)
         return model.coef_[0]
 
-    def adjust_weights_for_beta_neutrality(self):
-        beta_x = {}
-        beta_y = {}
+    # def adjust_weights_for_beta_neutrality(self):
+    #     beta_x = {}
+    #     beta_y = {}
 
-        for pair, data in self.pairs.items():
+    #     for pair, data in self.pairs.items():
+    #         px = self.data_universe[data['symbol_x']]['TRDPRC_1']
+    #         py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+    #         beta_x[pair] = self.compute_beta(px)
+    #         beta_y[pair] = self.compute_beta(py)
+
+    #     for pair, weight in self.weights.items():
+    #         hedge_ratio = self.pairs[pair]['hedge_ratio']
+    #         # Effective beta of the spread = beta_x - hedge * beta_y
+    #         beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
+    #         self.adjusted_weights[pair] = weight * beta_adj
+
+    #     total_weight = sum(abs(w) for w in self.adjusted_weights.values())
+    #     self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+
+    def adjust_weights_for_beta_neutrality(self):
+        """
+        Optimize weights to enforce beta neutrality and ADV-based position limits.
+        """
+        
+        target_weights = np.array([self.weights[pair] for pair in self.pairs])
+        pair_list = list(self.pairs.keys())
+
+        # Compute effective betas and ADV-based limits
+        effective_betas = []
+        
+        for pair in pair_list:
+            data = self.pairs[pair]
             px = self.data_universe[data['symbol_x']]['TRDPRC_1']
             py = self.data_universe[data['symbol_y']]['TRDPRC_1']
-            beta_x[pair] = self.compute_beta(px)
-            beta_y[pair] = self.compute_beta(py)
+            beta_x = self.compute_beta(px)
+            beta_y = self.compute_beta(py)
+            beta_spread = beta_x - data['hedge_ratio'] * beta_y
+            effective_betas.append(beta_spread)
 
-        for pair, weight in self.weights.items():
-            hedge_ratio = self.pairs[pair]['hedge_ratio']
-            # Effective beta of the spread = beta_x - hedge * beta_y
-            beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
-            self.adjusted_weights[pair] = weight * beta_adj
+        effective_betas = np.array(effective_betas)
 
-        total_weight = sum(abs(w) for w in self.adjusted_weights.values())
-        self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+        # Objective: minimize deviation from target weights
+        def objective(w):
+            return np.sum((w - target_weights) ** 2)
+
+        # Constraint: total gross exposure <= 1
+        def leverage_constraint(w):
+            return 1.0 - np.sum(np.abs(w))
+
+        # Constraint: portfolio beta neutrality = 0
+        def beta_constraint(w):
+            return np.dot(w, effective_betas)
+
+        constraints = [
+            {'type': 'ineq', 'fun': leverage_constraint},
+            {'type': 'eq',   'fun': beta_constraint}
+        ]
+
+        # Initial guess
+        x0 = target_weights.copy()
+        result = minimize(objective, x0, method='SLSQP', constraints=constraints)
+        if not result.success:
+            print("Optimization failed:", result.message)
+
+        optimized_weights = result.x
+        self.adjusted_weights = dict(zip(pair_list, optimized_weights))
+
 
     def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
         dates = self.returns[list(self.returns.keys())[0]].index
@@ -102,7 +153,7 @@ class SignalPortfolio:
         plt.plot(self.portfolio_value, label="Portfolio")
         plt.xlabel("Date")
         plt.ylabel("Portfolio Value ($)")
-        plt.title("Beta-Neutral Signal-Based Portfolio")
+        plt.title("Beta-Neutral Signal-Based Portfolio (No Fees, No Trade-Limit)")
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
@@ -219,52 +270,113 @@ class SignalPortfolioConstrained:
         y = asset_returns[-min_len:].values
         model = LinearRegression().fit(X, y)
         return model.coef_[0]
+    
 
+    # def adjust_weights_for_beta_neutrality(self):
+    #     beta_x = {}
+    #     beta_y = {}
+
+    #     for pair, data in self.pairs.items():
+    #         px = self.data_universe[data['symbol_x']]['TRDPRC_1']
+    #         py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+    #         beta_x[pair] = self.compute_beta(px)
+    #         beta_y[pair] = self.compute_beta(py)
+
+    #     for pair, weight in self.weights.items():
+    #         hedge_ratio = self.pairs[pair]['hedge_ratio']
+    #         beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
+    #         self.adjusted_weights[pair] = weight * beta_adj
+
+    #     total_weight = sum(abs(w) for w in self.adjusted_weights.values())
+    #     self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+    
+    
     def adjust_weights_for_beta_neutrality(self):
-        beta_x = {}
-        beta_y = {}
+        """
+        Optimize weights to enforce beta neutrality and ADV-based position limits.
+        """
+        
+        target_weights = np.array([self.weights[pair] for pair in self.pairs])
+        pair_list = list(self.pairs.keys())
 
-        for pair, data in self.pairs.items():
+        # Compute effective betas and ADV-based limits
+        effective_betas = []
+        adv_limits = []
+        for pair in pair_list:
+            data = self.pairs[pair]
             px = self.data_universe[data['symbol_x']]['TRDPRC_1']
             py = self.data_universe[data['symbol_y']]['TRDPRC_1']
-            beta_x[pair] = self.compute_beta(px)
-            beta_y[pair] = self.compute_beta(py)
+            beta_x = self.compute_beta(px)
+            beta_y = self.compute_beta(py)
+            beta_spread = beta_x - data['hedge_ratio'] * beta_y
+            effective_betas.append(beta_spread)
 
-        for pair, weight in self.weights.items():
-            hedge_ratio = self.pairs[pair]['hedge_ratio']
-            beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
-            self.adjusted_weights[pair] = weight * beta_adj
-
-        total_weight = sum(abs(w) for w in self.adjusted_weights.values())
-        self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
-
-    def apply_constraints(self, date):
-        constrained_weights = {}
-        gmv = self.initial_amount
-
-        for pair, weight in self.adjusted_weights.items():
-            data = self.pairs[pair]
-            x = data['symbol_x']
-            y = data['symbol_y']
-
-            # adv_x = self.adv_data.get(x, 1e9)
-            # adv_y = self.adv_data.get(y, 1e9)
-            
-            ### Average daily Volume ?? 
+            x, y = data['symbol_x'], data['symbol_y']
             adv_x = np.mean(list(self.data_universe[x]['ACVOL_UNS']))
             adv_y = np.mean(list(self.data_universe[y]['ACVOL_UNS']))
+            max_trade_val = 0.025 * min(adv_x, adv_y)
+            adv_limits.append(max_trade_val / self.initial_amount)
+
+        effective_betas = np.array(effective_betas)
+        adv_limits = np.array(adv_limits)
+
+        # Objective: minimize deviation from target weights
+        def objective(w):
+            return np.sum((w - target_weights) ** 2)
+
+        # Constraint: total gross exposure <= 1
+        def leverage_constraint(w):
+            return 1.0 - np.sum(np.abs(w))
+
+        # Constraint: portfolio beta neutrality = 0
+        def beta_constraint(w):
+            return np.dot(w, effective_betas)
+
+        constraints = [
+            {'type': 'ineq', 'fun': leverage_constraint},
+            {'type': 'eq',   'fun': beta_constraint}
+        ]
+
+        # Bounds per pair from ADV limits
+        bounds = [(-lim, lim) for lim in adv_limits]
+
+        # Initial guess
+        x0 = target_weights.copy()
+        result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
+        if not result.success:
+            print("Optimization failed:", result.message)
+
+        optimized_weights = result.x
+        self.adjusted_weights = dict(zip(pair_list, optimized_weights))
+
+    
+    # def apply_constraints(self, date):
+    #     constrained_weights = {}
+    #     gmv = self.initial_amount
+
+    #     for pair, weight in self.adjusted_weights.items():
+    #         data = self.pairs[pair]
+    #         x = data['symbol_x']
+    #         y = data['symbol_y']
+
+    #         # adv_x = self.adv_data.get(x, 1e9)
+    #         # adv_y = self.adv_data.get(y, 1e9)
             
-            max_trade_limit = 0.025 * min(adv_x, adv_y)
-            pos_limit = 0.025 * min(adv_x, adv_y)
+    #         ### Average daily Volume ?? 
+    #         adv_x = np.mean(list(self.data_universe[x]['ACVOL_UNS']))
+    #         adv_y = np.mean(list(self.data_universe[y]['ACVOL_UNS']))
+            
+    #         pos_limit = 0.025 * min(adv_x, adv_y)
 
-            position_value = abs(weight * gmv)
-            if position_value > pos_limit:
-                weight = np.sign(weight) * pos_limit / gmv
+    #         position_value = abs(weight * gmv)
+    #         if position_value > pos_limit:
+    #             weight = np.sign(weight) * pos_limit / gmv
 
-            constrained_weights[pair] = weight
+    #         constrained_weights[pair] = weight
 
-        total = sum(abs(w) for w in constrained_weights.values())
-        return {pair: w / total for pair, w in constrained_weights.items()}
+    #     total = sum(abs(w) for w in constrained_weights.values())
+    #     return {pair: w / total for pair, w in constrained_weights.items()}
+
 
     def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
         dates = self.returns[list(self.returns.keys())[0]].index
@@ -280,7 +392,7 @@ class SignalPortfolioConstrained:
         for t in range(1, len(dates)):
             date = dates[t]
             daily_return = 0
-            weights_today = self.apply_constraints(date)
+            weights_today = self.adjusted_weights
 
             for pair in self.pairs:
                 z = z_scores[pair].iloc[t]
@@ -330,8 +442,8 @@ class SignalPortfolioConstrained:
                 continue
 
             sorted_returns = window.sort_values()
-            var = sorted_returns.quantile(alpha)
-            es = sorted_returns[sorted_returns <= var].mean()
+            var = sorted_returns.quantile(alpha) ## worst 5% returns -- worst possible loss with 95% C.L - daily
+            es = sorted_returns[sorted_returns <= var].mean() ## tail-mean
 
             var_list.append(var)
             es_list.append(es)
@@ -348,10 +460,10 @@ class SignalPortfolioConstrained:
 
         plt.figure(figsize=(8, 4))
         sns.lineplot(data=var_usd, label=f'VaR ({int((1 - alpha) * 100)}%)')
-        sns.lineplot(data=es_usd, label=f'Expected Shortfall ({int((1 - alpha) * 100)}%)')
-        plt.axhline(-risk_limit, color='red', linestyle='--', label=f'Risk Limit (${risk_limit:,.0f})')
+        sns.lineplot(data=es_usd, label=f'Expected Shortfall ({int((1 - alpha) * 100)}%)') 
+        plt.axhline(-risk_limit/252, color='red', linestyle='--', label=f'Risk Limit (daily) (${risk_limit/252:,.0f})') ## very crude approx
         plt.title('Value at Risk (VaR) and Expected Shortfall (ES) Over Time')
-        plt.ylabel('Potential Loss in USD')
+        plt.ylabel('Potential Loss ($)')
         plt.xlabel('Date')
         plt.legend()
         plt.grid(True)

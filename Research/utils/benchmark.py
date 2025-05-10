@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from IPython.display import display
+from scipy.optimize import minimize
 
 class BenchmarkPortfolio:
     def __init__(self, initial_amount, pairs, data_universe, market_data):
@@ -43,22 +44,53 @@ class BenchmarkPortfolio:
         return model.coef_[0]
 
     def adjust_weights_for_beta_neutrality(self):
-        beta_x = {}
-        beta_y = {}
+        """
+        Optimize weights to enforce beta neutrality and ADV-based position limits.
+        """
+        
+        target_weights = np.array([self.weights[pair] for pair in self.pairs])
+        pair_list = list(self.pairs.keys())
 
-        for pair, data in self.pairs.items():
+        # Compute effective betas and ADV-based limits
+        effective_betas = []
+        
+        for pair in pair_list:
+            data = self.pairs[pair]
             px = self.data_universe[data['symbol_x']]['TRDPRC_1']
             py = self.data_universe[data['symbol_y']]['TRDPRC_1']
-            beta_x[pair] = self.compute_beta(px)
-            beta_y[pair] = self.compute_beta(py)
+            beta_x = self.compute_beta(px)
+            beta_y = self.compute_beta(py)
+            beta_spread = beta_x - data['hedge_ratio'] * beta_y
+            effective_betas.append(beta_spread)
 
-        for pair, weight in self.weights.items():
-            hedge_ratio = self.pairs[pair]['hedge_ratio']
-            beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
-            self.adjusted_weights[pair] = weight * beta_adj
+        effective_betas = np.array(effective_betas)
 
-        total_weight = sum(abs(w) for w in self.adjusted_weights.values())
-        self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
+        # Objective: minimize deviation from target weights
+        def objective(w):
+            return np.sum((w - target_weights) ** 2)
+
+        # Constraint: total gross exposure <= 1
+        def leverage_constraint(w):
+            return 1.0 - np.sum(np.abs(w))
+
+        # Constraint: portfolio beta neutrality = 0
+        def beta_constraint(w):
+            return np.dot(w, effective_betas)
+
+        constraints = [
+            {'type': 'ineq', 'fun': leverage_constraint},
+            {'type': 'eq',   'fun': beta_constraint}
+        ]
+
+        # Initial guess
+        x0 = target_weights.copy()
+        result = minimize(objective, x0, method='SLSQP', constraints=constraints)
+        if not result.success:
+            print("Optimization failed:", result.message)
+
+        optimized_weights = result.x
+        self.adjusted_weights = dict(zip(pair_list, optimized_weights))
+
 
     def backtest_portfolio(self):
         dates = self.returns[list(self.returns.keys())[0]].index
@@ -79,7 +111,7 @@ class BenchmarkPortfolio:
     def plot_performance(self):
         plt.figure(figsize=(8, 4))
         plt.plot(self.portfolio_value, label='Portfolio Value (USD)')
-        plt.title('Beta-Neutral Portfolio (Benchmark)')
+        plt.title('Beta-Neutral Portfolio (Benchmark) (No Fees, No Trade-Limit)')
         plt.xlabel('Date')
         plt.ylabel('Portfolio Value ($)')
         plt.legend()
