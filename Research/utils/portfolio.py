@@ -238,7 +238,7 @@ class SignalPortfolio:
 
 
 class SignalPortfolioConstrained:
-    def __init__(self, initial_amount, pairs, data_universe, market_data):
+    def __init__(self, initial_amount, pairs, data_universe, market_data, past_window=30):
         self.initial_amount = initial_amount
         self.pairs = pairs
         self.data_universe = data_universe
@@ -251,16 +251,27 @@ class SignalPortfolioConstrained:
         self.portfolio_value = None
         self.var_series = None
         self.es_series = None
+        self.z_scores = {}
+        self.past_window = past_window
 
     def compute_daily_returns(self):
         for pair, data in self.pairs.items():
             self.returns[pair] = data['spread_series'].pct_change().dropna()
 
-    def compute_inverse_volatility_weights(self):
-        volatilities = {pair: np.std(ret) for pair, ret in self.returns.items()}
+    def compute_rolling_z_scores(self):
+        self.z_scores = {}
+        for pair, data in self.pairs.items():
+            spread = data['spread_series']
+            rolling_mean = spread.rolling(window=self.past_window).mean()
+            rolling_std = spread.rolling(window=self.past_window).std()
+            z = (spread - rolling_mean) / rolling_std
+            self.z_scores[pair] = z
+
+    def compute_inverse_volatility_weights(self, t):
+        volatilities = {pair: np.std(ret[t - self.past_window: t]) for pair, ret in self.returns.items()}
         inv_vol = {pair: 1 / vol for pair, vol in volatilities.items() if vol != 0}
         total_inv_vol = sum(inv_vol.values())
-        self.weights = {pair: inv_vol[pair] / total_inv_vol for pair in inv_vol}
+        return {pair: inv_vol[pair] / total_inv_vol for pair in inv_vol}
 
     def compute_beta(self, price_series):
         asset_returns = price_series.pct_change().dropna()
@@ -270,36 +281,11 @@ class SignalPortfolioConstrained:
         y = asset_returns[-min_len:].values
         model = LinearRegression().fit(X, y)
         return model.coef_[0]
-    
 
-    # def adjust_weights_for_beta_neutrality(self):
-    #     beta_x = {}
-    #     beta_y = {}
-
-    #     for pair, data in self.pairs.items():
-    #         px = self.data_universe[data['symbol_x']]['TRDPRC_1']
-    #         py = self.data_universe[data['symbol_y']]['TRDPRC_1']
-    #         beta_x[pair] = self.compute_beta(px)
-    #         beta_y[pair] = self.compute_beta(py)
-
-    #     for pair, weight in self.weights.items():
-    #         hedge_ratio = self.pairs[pair]['hedge_ratio']
-    #         beta_adj = beta_x[pair] - hedge_ratio * beta_y[pair]
-    #         self.adjusted_weights[pair] = weight * beta_adj
-
-    #     total_weight = sum(abs(w) for w in self.adjusted_weights.values())
-    #     self.adjusted_weights = {pair: w / total_weight for pair, w in self.adjusted_weights.items()}
-    
-    
-    def adjust_weights_for_beta_neutrality(self):
-        """
-        Optimize weights to enforce beta neutrality and ADV-based position limits.
-        """
-        
-        target_weights = np.array([self.weights[pair] for pair in self.pairs])
+    def adjust_weights_for_beta_neutrality(self, weights):
+        target_weights = np.array([weights[pair] for pair in self.pairs])
         pair_list = list(self.pairs.keys())
 
-        # Compute effective betas and ADV-based limits
         effective_betas = []
         adv_limits = []
         for pair in pair_list:
@@ -320,15 +306,12 @@ class SignalPortfolioConstrained:
         effective_betas = np.array(effective_betas)
         adv_limits = np.array(adv_limits)
 
-        # Objective: minimize deviation from target weights
         def objective(w):
             return np.sum((w - target_weights) ** 2)
 
-        # Constraint: total gross exposure <= 1
         def leverage_constraint(w):
             return 1.0 - np.sum(np.abs(w))
 
-        # Constraint: portfolio beta neutrality = 0
         def beta_constraint(w):
             return np.dot(w, effective_betas)
 
@@ -337,84 +320,56 @@ class SignalPortfolioConstrained:
             {'type': 'eq',   'fun': beta_constraint}
         ]
 
-        # Bounds per pair from ADV limits
         bounds = [(-lim, lim) for lim in adv_limits]
-
-        # Initial guess
         x0 = target_weights.copy()
+
         result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
         if not result.success:
             print("Optimization failed:", result.message)
 
         optimized_weights = result.x
-        self.adjusted_weights = dict(zip(pair_list, optimized_weights))
-
-    
-    # def apply_constraints(self, date):
-    #     constrained_weights = {}
-    #     gmv = self.initial_amount
-
-    #     for pair, weight in self.adjusted_weights.items():
-    #         data = self.pairs[pair]
-    #         x = data['symbol_x']
-    #         y = data['symbol_y']
-
-    #         # adv_x = self.adv_data.get(x, 1e9)
-    #         # adv_y = self.adv_data.get(y, 1e9)
-            
-    #         ### Average daily Volume ?? 
-    #         adv_x = np.mean(list(self.data_universe[x]['ACVOL_UNS']))
-    #         adv_y = np.mean(list(self.data_universe[y]['ACVOL_UNS']))
-            
-    #         pos_limit = 0.025 * min(adv_x, adv_y)
-
-    #         position_value = abs(weight * gmv)
-    #         if position_value > pos_limit:
-    #             weight = np.sign(weight) * pos_limit / gmv
-
-    #         constrained_weights[pair] = weight
-
-    #     total = sum(abs(w) for w in constrained_weights.values())
-    #     return {pair: w / total for pair, w in constrained_weights.items()}
-
+        return dict(zip(pair_list, optimized_weights))
 
     def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
+
+        self.compute_rolling_z_scores()
         dates = self.returns[list(self.returns.keys())[0]].index
-        self.portfolio_returns = pd.Series(0, index=dates)
+        self.portfolio_returns = pd.Series(0.0, index=dates)
         position_tracker = {pair: 0 for pair in self.pairs}
-        z_scores = {}
+        current_weights = {pair: 0.0 for pair in self.pairs}
+        z_scores = {pair: z.reindex(dates).fillna(0) for pair, z in self.z_scores.items()}
 
-        for pair, data in self.pairs.items():
-            spread = data['spread_series']
-            z = (spread - data['spread_mean']) / data['spread_std']
-            z_scores[pair] = z.reindex(dates).fillna(0)
-
-        for t in range(1, len(dates)):
+        for t in range(self.past_window, len(dates)):
             date = dates[t]
-            daily_return = 0
-            weights_today = self.adjusted_weights
+            daily_return = 0.0
+
+            weights_today = self.compute_inverse_volatility_weights(t)
+            weights_today = self.adjust_weights_for_beta_neutrality(weights_today)
 
             for pair in self.pairs:
                 z = z_scores[pair].iloc[t]
                 ret = self.returns[pair].iloc[t]
-                pos = position_tracker[pair]
+                prev_pos = position_tracker[pair]
+                target_pos = prev_pos
                 weight = weights_today[pair]
 
-                if pos == 0:
+                if prev_pos == 0:
                     if z > entry_z:
-                        position_tracker[pair] = -1
+                        target_pos = -1
                     elif z < -entry_z:
-                        position_tracker[pair] = 1
-                elif pos == 1 and z > -exit_z:
-                    position_tracker[pair] = 0
-                elif pos == -1 and z < exit_z:
-                    position_tracker[pair] = 0
+                        target_pos = 1
+                elif prev_pos == 1 and z > -exit_z:
+                    target_pos = 0
+                elif prev_pos == -1 and z < exit_z:
+                    target_pos = 0
 
-                holding_days = 1 / 252
-                execution_cost = 0.0002 * abs(pos * weight)
-                financing_cost = 0.005 * holding_days * abs(pos * weight)
+                execution_cost = 0.0002 * abs(weight * (target_pos - prev_pos)) if target_pos != prev_pos else 0.0
+                financing_cost = 0.005 * (1 / 252) * abs(target_pos * weight)
+                pnl = prev_pos * weight * ret
+                daily_return += pnl - execution_cost - financing_cost
 
-                daily_return += pos * weight * ret - execution_cost - financing_cost
+                position_tracker[pair] = target_pos
+                current_weights[pair] = weight * target_pos
 
             self.portfolio_returns.iloc[t] = daily_return
 
@@ -442,8 +397,8 @@ class SignalPortfolioConstrained:
                 continue
 
             sorted_returns = window.sort_values()
-            var = sorted_returns.quantile(alpha) ## worst 5% returns -- worst possible loss with 95% C.L - daily
-            es = sorted_returns[sorted_returns <= var].mean() ## tail-mean
+            var = sorted_returns.quantile(alpha)
+            es = sorted_returns[sorted_returns <= var].mean()
 
             var_list.append(var)
             es_list.append(es)
@@ -461,7 +416,7 @@ class SignalPortfolioConstrained:
         plt.figure(figsize=(8, 4))
         sns.lineplot(data=var_usd, label=f'VaR ({int((1 - alpha) * 100)}%)')
         sns.lineplot(data=es_usd, label=f'Expected Shortfall ({int((1 - alpha) * 100)}%)') 
-        plt.axhline(-risk_limit/252, color='red', linestyle='--', label=f'Risk Limit (daily) (${risk_limit/252:,.0f})') ## very crude approx
+        plt.axhline(-risk_limit/252, color='red', linestyle='--', label=f'Risk Limit (daily) (${risk_limit/252:,.0f})')
         plt.title('Value at Risk (VaR) and Expected Shortfall (ES) Over Time')
         plt.ylabel('Potential Loss ($)')
         plt.xlabel('Date')
@@ -482,18 +437,19 @@ class SignalPortfolioConstrained:
         plt.show()
 
     def plot_pair_signals(self, pair_name, entry_z=1.0, exit_z=0.2):
+
         pair_data = self.pairs[pair_name]
         spread = pair_data['spread_series']
-        mean = pair_data['spread_mean']
-        std = pair_data['spread_std']
+        rolling_mean = spread.rolling(window=self.past_window).mean()
+        rolling_std = spread.rolling(window=self.past_window).std()
+        z_score = (spread - rolling_mean) / rolling_std
 
-        z_score = (spread - mean) / std
         position = 0
         entries, exits = [], []
 
-        for t in range(1, len(z_score)):
-            z = z_score.iloc[t]
+        for t in range(self.past_window, len(z_score)):
 
+            z = z_score.iloc[t]
             if position == 0:
                 if z > entry_z:
                     entries.append((z_score.index[t], spread.iloc[t], 'short'))
@@ -510,11 +466,6 @@ class SignalPortfolioConstrained:
 
         plt.figure(figsize=(8, 4))
         plt.plot(spread, label='Spread')
-        # plt.axhline(mean, color='gray', linestyle='--', label='Mean')
-        # plt.axhline(mean + entry_z * std, color='red', linestyle='--', label=f'+{entry_z}σ')
-        # plt.axhline(mean - entry_z * std, color='green', linestyle='--', label=f'-{entry_z}σ')
-        # plt.axhline(mean + exit_z * std, color='orange', linestyle=':', label=f'+{exit_z}σ exit')
-        # plt.axhline(mean - exit_z * std, color='orange', linestyle=':', label=f'-{exit_z}σ exit')
 
         for dt, val, signal in entries:
             plt.plot(dt, val, 'go' if signal == 'long' else 'ro', label=f'Entry ({signal})')
@@ -524,7 +475,6 @@ class SignalPortfolioConstrained:
         plt.title(f'Trading Signals for Pair: {pair_name}')
         plt.xlabel('Date')
         plt.ylabel('Spread')
-        # plt.legend()
         plt.grid(True)
         plt.tight_layout()
         plt.show()
@@ -539,8 +489,6 @@ class SignalPortfolioConstrained:
 
     def run(self):
         self.compute_daily_returns()
-        self.compute_inverse_volatility_weights()
-        self.adjust_weights_for_beta_neutrality()
         self.backtest_with_signals()
         self.plot_performance()
         sharpe, mdd = self.evaluate_performance()
