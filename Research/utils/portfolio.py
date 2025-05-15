@@ -236,9 +236,8 @@ class SignalPortfolio:
 #### --------------------------------------------------------------------------------------------------------- ######
 #### --------------------------------------------------------------------------------------------------------- ######
 
-
 class SignalPortfolioConstrained:
-    def __init__(self, initial_amount, pairs, data_universe, market_data, past_window=30):
+    def __init__(self, initial_amount, pairs, data_universe, market_data, past_window = 30, entry_z = 1.0, exit_z = 0.2):
         self.initial_amount = initial_amount
         self.pairs = pairs
         self.data_universe = data_universe
@@ -253,6 +252,8 @@ class SignalPortfolioConstrained:
         self.es_series = None
         self.z_scores = {}
         self.past_window = past_window
+        self.entry_z = entry_z
+        self.exit_z = exit_z
 
     def compute_daily_returns(self):
         for pair, data in self.pairs.items():
@@ -330,12 +331,12 @@ class SignalPortfolioConstrained:
         optimized_weights = result.x
         return dict(zip(pair_list, optimized_weights))
 
-    def backtest_with_signals(self, entry_z=1.0, exit_z=0.2):
+    def backtest_with_signals(self):
 
         self.compute_rolling_z_scores()
         dates = self.returns[list(self.returns.keys())[0]].index
         self.portfolio_returns = pd.Series(0.0, index=dates)
-        position_tracker = {pair: 0 for pair in self.pairs}
+        position_tracker = {pair: 0 for pair in self.pairs} ## -1: short, 0: No position, 1: Long
         current_weights = {pair: 0.0 for pair in self.pairs}
         z_scores = {pair: z.reindex(dates).fillna(0) for pair, z in self.z_scores.items()}
 
@@ -354,14 +355,14 @@ class SignalPortfolioConstrained:
                 weight = weights_today[pair]
 
                 if prev_pos == 0:
-                    if z > entry_z:
-                        target_pos = -1
-                    elif z < -entry_z:
+                    if z < - self.entry_z: ## Long Spread
                         target_pos = 1
-                elif prev_pos == 1 and z > -exit_z:
+                    # elif z > self.entry_z: ## Short Spread
+                    #     target_pos = -1 
+                elif prev_pos == 1 and z > - self.exit_z:
                     target_pos = 0
-                elif prev_pos == -1 and z < exit_z:
-                    target_pos = 0
+                # elif prev_pos == -1 and z < self.exit_z:
+                #     target_pos = 0
 
                 execution_cost = 0.0002 * abs(weight * (target_pos - prev_pos)) if target_pos != prev_pos else 0.0
                 financing_cost = 0.005 * (1 / 252) * abs(target_pos * weight)
@@ -436,7 +437,7 @@ class SignalPortfolioConstrained:
         plt.tight_layout()
         plt.show()
 
-    def plot_pair_signals(self, pair_name, entry_z=1.0, exit_z=0.2):
+    def plot_pair_signals(self, pair_name):
 
         pair_data = self.pairs[pair_name]
         spread = pair_data['spread_series']
@@ -451,18 +452,18 @@ class SignalPortfolioConstrained:
 
             z = z_score.iloc[t]
             if position == 0:
-                if z > entry_z:
-                    entries.append((z_score.index[t], spread.iloc[t], 'short'))
-                    position = -1
-                elif z < -entry_z:
+                if z < -self.entry_z:
                     entries.append((z_score.index[t], spread.iloc[t], 'long'))
                     position = 1
-            elif position == 1 and z > -exit_z:
+                # elif z > self.entry_z:
+                #     entries.append((z_score.index[t], spread.iloc[t], 'short'))
+                #     position = -1
+            elif position == 1 and z > - self.exit_z:
                 exits.append((z_score.index[t], spread.iloc[t]))
                 position = 0
-            elif position == -1 and z < exit_z:
-                exits.append((z_score.index[t], spread.iloc[t]))
-                position = 0
+            # elif position == -1 and z < self.exit_z:
+            #     exits.append((z_score.index[t], spread.iloc[t]))
+            #     position = 0
 
         plt.figure(figsize=(8, 4))
         plt.plot(spread, label='Spread')
@@ -485,7 +486,10 @@ class SignalPortfolioConstrained:
         X = market_returns[-min_len:].values.reshape(-1, 1)
         y = self.portfolio_returns[-min_len:].values
         model = LinearRegression().fit(X, y)
-        print('Portfolio-Beta: ', model.coef_[0])
+        print('Portfolio-Beta (Daily): ', model.coef_[0])
+        print('Portfolio-Alpha (Daily) (%): ', model.intercept_ * 100, ' %')
+        alpha_annualized = ((1 + model.intercept_) ** 252) - 1
+        print('Portfolio-Alpha (Annual) (%): ', alpha_annualized * 100, ' %')
 
     def run(self):
         self.compute_daily_returns()

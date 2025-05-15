@@ -1,4 +1,4 @@
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import pandas as pd
@@ -33,10 +33,23 @@ def _agglo_cluster(pca_arr, cluster_percentile = 20):
 
     cluster_labels = aggl_cluster.fit_predict(pca_arr)
 
-    print('nunmber of clusters generated: ', len(np.unique(cluster_labels)))
+    print('Agglom - nunmber of clusters generated: ', len(np.unique(cluster_labels)))
 
     return cluster_labels
 
+def _dbscan_cluster(pca_arr, eps=0.5, min_samples=5):
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+    cluster_labels = dbscan.fit_predict(pca_arr)
+    n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+    print('DBSCAN - number of clusters (excluding noise):', n_clusters)
+    return cluster_labels
+
+
+def _kmeans_cluster(pca_arr, n_clusters=5):
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    cluster_labels = kmeans.fit_predict(pca_arr)
+    print('KMeans - number of clusters:', len(np.unique(cluster_labels)))
+    return cluster_labels
 
 class Different_clustering_algorithm:
 
