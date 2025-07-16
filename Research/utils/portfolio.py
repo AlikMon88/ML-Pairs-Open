@@ -344,6 +344,7 @@ class SignalPortfolioConstrained:
             date = dates[t]
             daily_return = 0.0
 
+            ### Daily Rebalancing
             weights_today = self.compute_inverse_volatility_weights(t)
             weights_today = self.adjust_weights_for_beta_neutrality(weights_today)
 
