@@ -1,6 +1,12 @@
 # import refinitiv.data as rd
 import pandas as pd
 import numpy as np
+import yfinance as yf
+import ccxt
+
+''' Interactive Plots '''
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
 def _manual_universe_creation():
     tickers = ["AAPL.OQ", "MSFT.OQ", "GOOGL.OQ", "AMZN.OQ", "META.OQ", "TSLA.OQ", 
@@ -31,3 +37,122 @@ if __name__ == '__main__':
     df_stocks = _call_stocks()
     print(df_stocks.head())
     rd.close_session()
+    
+''' 4 yr default (365 trading days for crypto (24/7)) | NEED: add crypto fundamentals'''
+def get_ccxt_crypto_data(symbol='BTC/USDT', timeframe='1d', limit=1460, is_plot=False):
+    
+    # 1. Fetch Data using CCXT
+    exchange = ccxt.binance()  # Using Binance as the source
+    if not exchange.has['fetchOHLCV']:
+        print(f"The selected exchange ({exchange.id}) does not support fetching OHLCV data.")
+        return
+
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    if not ohlcv:
+        print(f"Could not fetch data for {symbol}. The symbol may be invalid for {exchange.id}.")
+        return
+
+    # 2. Convert to Pandas DataFrame
+    df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
+    df.set_index('Timestamp', inplace=True)
+    
+    if is_plot:
+
+        # 3. Create Interactive Plot
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.03,
+            subplot_titles=(f'{symbol} Candlestick', 'Volume'),
+            row_width=[0.2, 0.7]
+        )
+
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            name="OHLC"
+        ), row=1, col=1)
+
+        # Volume chart
+        fig.add_trace(go.Bar(
+            x=df.index,
+            y=df['Volume'],
+            name='Volume',
+            marker_color='orange'
+        ), row=2, col=1)
+
+        fig.update_layout(
+            title_text=f"{symbol} Price Data",
+            xaxis_rangeslider_visible=False
+        )
+        print(f"Displaying chart for {symbol}...")
+        fig.show()
+
+    return df
+
+''' Use 'Plotly' to create interactive plots | 1008 trading days / 255 per year '''
+def get_yfinance_equities_data(ticker='AAPL', period="4y", is_plot=False):
+    
+    # 1. Fetch Data using yfinance
+    stock = yf.Ticker(ticker)
+    hist_df = stock.history(period=period)
+    info = stock.info
+
+    if hist_df.empty:
+        print(f"Error: Could not fetch historical data for {ticker}. It may be delisted or an invalid ticker.")
+        return
+
+    # 2. Prepare Fundamental Data for Display
+    market_cap = info.get('marketCap', 'N/A')
+    pe_ratio = info.get('trailingPE', 'N/A')
+    sector = info.get('sector', 'N/A')
+    summary = info.get('longBusinessSummary', 'No summary available.')
+    
+    fund_df = pd.DataFrame({'mkcp': [market_cap], 'pe_ratio': [pe_ratio], 'sector': [sector], 'summary': [summary]})
+
+    if is_plot:
+
+        # 3. Create Interactive Plot
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.03,
+            subplot_titles=(f'{ticker} Candlestick', 'Volume'),
+            row_width=[0.2, 0.7]
+        )
+
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=hist_df.index,
+            open=hist_df['Open'],
+            high=hist_df['High'],
+            low=hist_df['Low'],
+            close=hist_df['Close'],
+            name="OHLC"
+        ), row=1, col=1)
+
+        # Volume chart
+        fig.add_trace(go.Bar(
+            x=hist_df.index,
+            y=hist_df['Volume'],
+            name='Volume',
+            marker_color='royalblue'
+        ), row=2, col=1)
+
+
+        fig.update_layout(
+            title_text=f"{ticker} Price Data",
+            xaxis_rangeslider_visible=False
+        )        
+
+        print(f"Displaying chart for {ticker}...")
+        fig.show()
+        
+    
+    return hist_df, fund_df
+
