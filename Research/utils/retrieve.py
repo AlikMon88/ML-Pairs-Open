@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import ccxt
+from IPython.display import display 
 
 ''' Interactive Plots '''
 from plotly.subplots import make_subplots
@@ -38,25 +39,66 @@ if __name__ == '__main__':
     print(df_stocks.head())
     rd.close_session()
     
+    
 ''' 4 yr default (365 trading days for crypto (24/7)) | NEED: add crypto fundamentals'''
-def get_ccxt_crypto_data(symbol='BTC/USDT', timeframe='1d', limit=1460, is_plot=False):
+''' load_universe=True | We pick 50 most liquid tokens for physical universe-selection (from Binance Exchange)'''
+def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_universe=False):
     
     # 1. Fetch Data using CCXT
     exchange = ccxt.binance()  # Using Binance as the source
     if not exchange.has['fetchOHLCV']:
         print(f"The selected exchange ({exchange.id}) does not support fetching OHLCV data.")
         return
-
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    if not ohlcv:
-        print(f"Could not fetch data for {symbol}. The symbol may be invalid for {exchange.id}.")
-        return
-
-    # 2. Convert to Pandas DataFrame
-    df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
-    df.set_index('Timestamp', inplace=True)
     
+    # Load market data
+    markets = exchange.load_markets()
+
+    # Filter symbols with USDT pairs
+    usdt_markets = [symbol for symbol in markets if symbol.endswith('/USDT')][:100]
+    print('USDT-markets-retrieved: ', len(usdt_markets), usdt_markets[:2])
+
+    # Fetch tickers (includes volume info)
+    tickers = exchange.fetch_tickers(usdt_markets)
+
+    # Sort by quote volume in descending order
+    sorted_markets = sorted(
+        tickers.items(),
+        key=lambda x: x[1]['quoteVolume'] if x[1]['quoteVolume'] is not None else 0,
+        reverse=True
+    )
+
+    # Top 50 most liquid tokens
+    symbols = [ticker for ticker, _ in sorted_markets[:50]]
+    print(symbols)
+    
+    if not load_universe:
+        symbols = [symbols[0]]
+        
+    
+    candle_dict =  {}
+    for symbol in symbols:
+        
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        if not ohlcv:
+            print(f"Could not fetch data for {symbol}. The symbol may be invalid for {exchange.id}.")
+            return
+
+        candle_dict[symbol] = ohlcv
+
+    df_dict = {}    
+    for symbol, ohlcvs in candle_dict.items():
+        df = pd.DataFrame(ohlcvs,  columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('datetime', inplace=True)
+        df.drop(columns='timestamp', inplace=True)
+        df_dict[symbol] = df 
+    
+    df_universe = pd.concat(df_dict, axis=0)
+    display(df_universe.head(5))
+    
+    # df_universe.columns.names = ['symbol', 'ohlcv'] ## level 0 and level 1 col names for multi-index dataframes
+    # df_universe.index.name = 'datetime'
+        
     if is_plot:
 
         # 3. Create Interactive Plot
@@ -93,7 +135,7 @@ def get_ccxt_crypto_data(symbol='BTC/USDT', timeframe='1d', limit=1460, is_plot=
         print(f"Displaying chart for {symbol}...")
         fig.show()
 
-    return df
+    return df_universe, symbols
 
 ''' Use 'Plotly' to create interactive plots | 1008 trading days / 255 per year '''
 def get_yfinance_equities_data(ticker='AAPL', period="4y", is_plot=False):
