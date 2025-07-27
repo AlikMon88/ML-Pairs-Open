@@ -15,6 +15,50 @@ def _manual_universe_creation():
                "PYPL.OQ", "SBUX.OQ", "INTU.OQ", "TEAM.OQ", "BIDU.OQ", "EXPE.OQ"]
     return tickers
 
+def get_top_100_liquid_binance_pairs():
+    
+    top_100_liquid_formatted = [
+        # Tier 1: Highest Liquidity (Multi-Billion $ Daily Volume)
+        'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT',
+        
+        # Tier 2: Very High Liquidity (High Hundreds of Millions to Billions)
+        'PEPE/USDT', 'NOT/USDT', 'SHIB/USDT', 'WIF/USDT', 'BONK/USDT', 'AVAX/USDT', 
+        'MATIC/USDT', 'LINK/USDT', 'DOT/USDT', 'TRX/USDT', 'LTC/USDT', 'BCH/USDT',
+        'ADA/USDT', 'NEAR/USDT', 'OP/USDT', 'UNI/USDT', 'ETC/USDT', 'FIL/USDT',
+        
+        # Tier 3: High Liquidity (Tens to Hundreds of Millions)
+        'RNDR/USDT', 'INJ/USDT', 'ICP/USDT', 'IMX/USDT', 'ARB/USDT', 'APT/USDT', 
+        'STX/USDT', 'GRT/USDT', 'SUI/USDT', 'FTM/USDT', 'AAVE/USDT', 'VET/USDT',
+        'MKR/USDT', 'THETA/USDT', 'RUNE/USDT', 'ALGO/USDT', 'EGLD/USDT', 'TWT/USDT',
+        'DYDX/USDT', 'SAND/USDT', 'GALA/USDT', 'AXS/USDT', 'MANA/USDT', 'LDO/USDT',
+        'KAVA/USDT', 'CAKE/USDT', 'FLOW/USDT', 'CRV/USDT', 'CHZ/USDT', 'ZIL/USDT',
+        
+        # Tier 4: Good Liquidity (Reliable Volume for Most Strategies)
+        'FET/USDT', 'OCEAN/USDT', 'WAVES/USDT', 'ENJ/USDT', '1INCH/USDT', 'ANKR/USDT',
+        'ASTR/USDT', 'ROSE/USDT', 'CELO/USDT', 'JASMY/USDT', 'KSM/USDT', 'QTUM/USDT',
+        'SUSHI/USDT', 'SNX/USDT', 'YFI/USDT', 'ZRX/USDT', 'BAT/USDT', 'STORJ/USDT',
+        'SKL/USDT', 'REN/USDT', 'CELR/USDT', 'NKN/USDT', 'CTSI/USDT', 'ARPA/USDT',
+        'RLC/USDT', 'KNC/USDT', 'REEF/USDT', 'BNT/USDT', 'RSR/USDT', 'SFP/USDT',
+        'HIGH/USDT', 'DAR/USDT', 'SLP/USDT', 'ALICE/USDT', 'ILV/USDT', 'YGG/USDT',
+        'TRB/USDT', 'NMR/USDT', 'SPELL/USDT', 'API3/USDT', 'BLZ/USDT', 'LINA/USDT',
+        'COTI/USDT', 'DASH/USDT', 'XLM/USDT', 'WRX/USDT', 'MASK/USDT', 'LPT/USDT',
+        
+        # Stable-Coin 
+        'USDC/USDT'
+    ]
+    
+    return top_100_liquid_formatted
+
+
+def fetch_tickers_safe(exchange, symbols):
+    try:
+        return exchange.fetch_tickers(symbols)
+    
+    except Exception as e:    
+        print(f"Batch fetch_tickers failed: {e}. Manual Retrieval (100-most-Liquid).")
+        manual_usdt_pairs = get_top_100_liquid_binance_pairs()
+        return exchange.fetch_tickers(manual_usdt_pairs)
+    
 ### Sector-wise? Return ordering based on internal ref listing 
 def _call_stocks(limit = 30, is_nasdaq = False):
     sp500_constituents = rd.get_data(
@@ -42,7 +86,7 @@ if __name__ == '__main__':
     
 ''' 4 yr default (365 trading days for crypto (24/7)) | NEED: add crypto fundamentals'''
 ''' load_universe=True | We pick 50 most liquid tokens for physical universe-selection (from Binance Exchange)'''
-def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_universe=False):
+def get_ccxt_crypto_data(timeframe='1d', limit=1000, is_plot=False, load_universe=False):
     
     # 1. Fetch Data using CCXT
     exchange = ccxt.binance()  # Using Binance as the source
@@ -53,12 +97,13 @@ def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_univers
     # Load market data
     markets = exchange.load_markets()
 
-    # Filter symbols with USDT pairs
-    usdt_markets = [symbol for symbol in markets if symbol.endswith('/USDT')][:100]
+    # Filter symbols with USDT pairs ## 550 total-pairs
+    usdt_markets = [symbol for symbol in markets if symbol.endswith('/USDT')]
     print('USDT-markets-retrieved: ', len(usdt_markets), usdt_markets[:2])
 
     # Fetch tickers (includes volume info)
-    tickers = exchange.fetch_tickers(usdt_markets)
+    tickers = fetch_tickers_safe(exchange, usdt_markets)
+    # tickers = exchange.fetch_tickers(usdt_markets)
 
     # Sort by quote volume in descending order
     sorted_markets = sorted(
@@ -68,7 +113,7 @@ def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_univers
     )
 
     # Top 50 most liquid tokens
-    symbols = [ticker for ticker, _ in sorted_markets[:50]]
+    symbols = [ticker for ticker, _ in sorted_markets]
     print(symbols)
     
     if not load_universe:
@@ -76,13 +121,18 @@ def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_univers
         
     
     candle_dict =  {}
+    symbols_new = []
     for symbol in symbols:
         
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         if not ohlcv:
             print(f"Could not fetch data for {symbol}. The symbol may be invalid for {exchange.id}.")
             return
-
+        
+        if len(ohlcv) < limit:
+            continue
+        
+        symbols_new.append(symbol)
         candle_dict[symbol] = ohlcv
 
     df_dict = {}    
@@ -94,6 +144,8 @@ def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_univers
         df_dict[symbol] = df 
     
     df_universe = pd.concat(df_dict, axis=0)
+    df_universe.index.names = ['symbol', 'datetime']
+    
     display(df_universe.head(5))
     
     # df_universe.columns.names = ['symbol', 'ohlcv'] ## level 0 and level 1 col names for multi-index dataframes
@@ -135,7 +187,7 @@ def get_ccxt_crypto_data(timeframe='1d', limit=1460, is_plot=False, load_univers
         print(f"Displaying chart for {symbol}...")
         fig.show()
 
-    return df_universe, symbols
+    return df_universe, symbols_new
 
 ''' Use 'Plotly' to create interactive plots | 1008 trading days / 255 per year '''
 def get_yfinance_equities_data(ticker='AAPL', period="4y", is_plot=False):
