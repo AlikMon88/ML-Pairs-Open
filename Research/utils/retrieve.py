@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import ccxt
-from IPython.display import display 
+from IPython.display import display
+import time 
 
 ''' Interactive Plots '''
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 def _manual_universe_creation():
     tickers = ["AAPL.OQ", "MSFT.OQ", "GOOGL.OQ", "AMZN.OQ", "META.OQ", "TSLA.OQ", 
@@ -250,3 +250,81 @@ def get_yfinance_equities_data(ticker='AAPL', period="4y", is_plot=False):
     
     return hist_df, fund_df
 
+
+def data_clean(df_uni, stocks, history_limit, type='cryp', fund_df=None, is_plot=False):
+    
+    ft = time.time()
+    
+    print('Data-Cleaning ...')
+    
+    val_arr = []
+    correction_count = 0
+
+    if fund_df is not None:
+        _elem_stocks = []
+    
+    for i, nm in enumerate(stocks):
+        
+        df = df_uni.loc[nm]
+        
+        if len(df) > history_limit:
+            error_close = df.copy().close.ffill().bfill()
+            correction_count += 1
+    
+        df = df[~df.index.duplicated(keep='first')] ## again-duplicate filtering - API feed call problem
+        
+        if correction_count == 1:
+            corr_close = df.copy().close.ffill().bfill()
+            
+        # Fill missing values forward first, then backfill if necessary
+        close_price = df['close'].ffill().bfill()
+        vol = df['volume'].ffill().bfill()
+        pct = close_price.pct_change().fillna(0)
+        
+        # Compute returns from filled prices
+        pct = pct.tolist()
+        close = close_price.tolist()
+        vol = vol.tolist()
+    
+        if type == 'cryp':
+            
+            val_arr.append([close, pct, vol])
+
+        elif type == 'eq':
+            ''' equity-specific fundamentals '''
+            
+            # Get fundamentals and fill as needed
+            try:
+                revenue = pd.Series(fund_df.loc[nm]['Revenue']).ffill().bfill().tolist()
+                gross_profit = pd.Series(fund_df.loc[nm]['Gross Profit']).ffill().bfill().tolist()
+            except KeyError:
+                _elem_stocks.append(nm)
+                continue
+
+            # If revenue or gross profit is still missing (all values NA), skip
+            if any(pd.isna(v) for v in revenue + gross_profit):
+                _elem_stocks.append(nm)
+                continue
+            
+            val_arr.append([close, pct, vol, revenue, gross_profit])
+            
+        else:
+            raise ValueError(f'wrong data-type pass in "{type}". ')
+
+        if (correction_count == 1) and is_plot:
+            
+            fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+            
+            axs[0].plot(error_close)
+            axs[0].set_title('Error_Close')
+            
+            axs[1].plot(corr_close)
+            axs[1].set_title('Correcteed_Close')
+            
+            plt.tight_layout(pad = 2)
+            plt.show()
+    
+    lt = time.time()
+    print('time-taken for data-cleaning: ', (lt - ft)/60, ' mins')
+    
+    return val_arr

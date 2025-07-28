@@ -22,7 +22,7 @@ class Backtest:
     def run(self):
         """Runs the backtest and computes performance metrics."""
         self.data["Signal"] = self.strategy(self.data)
-        self.data["Returns"] = self.data['TRDPRC_1'].pct_change() * self.data["Signal"].shift(1)
+        self.data["Returns"] = self.data['close'].pct_change() * self.data["Signal"].shift(1)
 
         # Calculate equity curve | no Concurrent trade + going with 100% capital all the time
         self.data["Equity"] = self.initial_capital * (1 + self.data["Returns"]).cumprod()
@@ -71,8 +71,8 @@ class Backtest:
 # Example: Simple Moving Average Crossover Strategy
 def simple_sma_strategy(data, short_window=25, long_window=60):
     
-    data["SMA_Short"] = data['TRDPRC_1'].rolling(short_window).mean()
-    data["SMA_Long"] = data['TRDPRC_1'].rolling(long_window).mean()
+    data["SMA_Short"] = data['close'].rolling(short_window).mean()
+    data["SMA_Long"] = data['close'].rolling(long_window).mean()
 
     position_binary = np.where(data["SMA_Short"] > data["SMA_Long"], 1, 0)
     

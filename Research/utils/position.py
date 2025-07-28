@@ -7,7 +7,7 @@ def CalculateMarketVolatility(benchmark_history, market_volatility = 0.0, market
     if benchmark_history.empty:
         return market_volatility
     
-    returns = benchmark_history['TRDPRC_1'].pct_change().dropna()
+    returns = benchmark_history['close'].pct_change().dropna()
     
     if len(returns) == 0:
         return market_volatility

@@ -32,15 +32,17 @@ def SelectCointegratedPairs(symbols, cluster_labels, history, hurst_threshold = 
                     sym_j = cluster_symbols[j]
 
                     try:
-                        prices_i = history[sym_i]["TRDPRC_1"]
-                        prices_j = history[sym_j]["TRDPRC_1"]
+                        prices_i = history.loc[sym_i]["close"]
+                        prices_j = history.loc[sym_j]["close"]
                         
                         if prices_i.isnull().any() or prices_j.isnull().any():
                             print(f"Missing data for pair {sym_i}-{sym_j}. Skipping.")
                             continue
                         
                         coint_t, pvalue, _ = coint(prices_i, prices_j)
-
+                        
+                        print('P-Value: ', pvalue)
+                        
                         if pvalue < 0.05:
                             
                             # Calculate hedge ratio using rolling regression

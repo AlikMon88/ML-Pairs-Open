@@ -71,8 +71,8 @@ class SignalPortfolio:
         
         for pair in pair_list:
             data = self.pairs[pair]
-            px = self.data_universe[data['symbol_x']]['TRDPRC_1']
-            py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+            px = self.data_universe[data['symbol_x']]['close']
+            py = self.data_universe[data['symbol_y']]['close']
             beta_x = self.compute_beta(px)
             beta_y = self.compute_beta(py)
             beta_spread = beta_x - data['hedge_ratio'] * beta_y
@@ -291,8 +291,8 @@ class SignalPortfolioConstrained:
         adv_limits = []
         for pair in pair_list:
             data = self.pairs[pair]
-            px = self.data_universe[data['symbol_x']]['TRDPRC_1']
-            py = self.data_universe[data['symbol_y']]['TRDPRC_1']
+            px = self.data_universe[data['symbol_x']]['close']
+            py = self.data_universe[data['symbol_y']]['close']
             beta_x = self.compute_beta(px)
             beta_y = self.compute_beta(py)
             beta_spread = beta_x - data['hedge_ratio'] * beta_y
