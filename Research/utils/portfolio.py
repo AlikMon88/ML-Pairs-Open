@@ -71,8 +71,8 @@ class SignalPortfolio:
         
         for pair in pair_list:
             data = self.pairs[pair]
-            px = self.data_universe[data['symbol_x']]['close']
-            py = self.data_universe[data['symbol_y']]['close']
+            px = self.data_universe.loc[data['symbol_x']]['close']
+            py = self.data_universe.loc[data['symbol_y']]['close']
             beta_x = self.compute_beta(px)
             beta_y = self.compute_beta(py)
             beta_spread = beta_x - data['hedge_ratio'] * beta_y
@@ -291,16 +291,16 @@ class SignalPortfolioConstrained:
         adv_limits = []
         for pair in pair_list:
             data = self.pairs[pair]
-            px = self.data_universe[data['symbol_x']]['close']
-            py = self.data_universe[data['symbol_y']]['close']
+            px = self.data_universe.loc[data['symbol_x']]['close']
+            py = self.data_universe.loc[data['symbol_y']]['close']
             beta_x = self.compute_beta(px)
             beta_y = self.compute_beta(py)
             beta_spread = beta_x - data['hedge_ratio'] * beta_y
             effective_betas.append(beta_spread)
 
             x, y = data['symbol_x'], data['symbol_y']
-            adv_x = np.mean(list(self.data_universe[x]['ACVOL_UNS']))
-            adv_y = np.mean(list(self.data_universe[y]['ACVOL_UNS']))
+            adv_x = np.mean(list(self.data_universe.loc[x]['volume']))
+            adv_y = np.mean(list(self.data_universe.loc[y]['volume']))
             max_trade_val = 0.025 * min(adv_x, adv_y)
             adv_limits.append(max_trade_val / self.initial_amount)
 

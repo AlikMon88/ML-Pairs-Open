@@ -1,0 +1,62 @@
+### We Detail the Fees Associated with Trading in Binance-EX (through Binance API) | Disclaimer: taken from Gemini Pro 2.5 (NEED: verify from binance API docs)
+
+<Spot/Margin>
+
+We trade in the spot/real. asset price -> shorting comes with margin from the exchange (Loan + Interest) - Margin Call forcibly liquidates all the position to cover that. Long/Short Spread will force simult. long and short so need to 
+account for account margin all the time.
+
+Margin Level = Total Asset Value / (Total Borrowed Value + Total Accrued Interest)
+
+Fees:
+
+1. Trading Fees
+This is paid on every buy and sell order. For a round-trip pairs trade, this fee is paid four times.
+Standard Rate (VIP 0): 0.10%
+With 25% BNB Discount: 0.075%
+
+2. Margin Borrow Interest
+This is the direct, ongoing cost of holding your short position.
+How it Works: It is calculated hourly based on the amount of the asset you borrowed. The rate is variable and changes based on market demand for that specific asset.
+The Data Challenge: Historical hourly borrow rates are not easily available via the API.
+The Solution for Backtesting: You must use a realistic, conservative average for your backtest. A sensible approach is to find the current annualized interest rates for your top assets and use a slightly higher average.
+Example: If current rates are ~5% annually, use a 10% annualized rate in your model to be conservative.
+Calculation: Hourly Interest Cost = (Amount of Asset B Borrowed * Price of B) * (Annual_Interest_Rate / 365 / 24)
+
+3. Margin Call Liquidation Fee
+This is the penalty fee if your Margin Level drops to the liquidation threshold (e.g., 1.1).
+What Happens: Binance forcibly sells your collateral assets (the long leg of your pair and any other assets) to repay your loan plus interest.
+The Fee: Binance charges a penalty fee on this forced sale, typically around 2%. This is a catastrophic cost on top of your trading loss.
+
+# Real World Scenario Liquidity and borrow risk -> if units are available in binance for margin.
+
+<Perp. Futures> --> Associative --> <HyperLiquid> <Important>
+
+We have seperate Maker and Taker fees.
+
+1. Trading Fees (Maker vs. Taker)
+This is the fee on entry and exit. Since a pairs trade has two legs, you pay this fee four times for a single round-trip trade (Entry A, Entry B, Exit A, Exit B).
+Taker Fee (Market Order): 0.045% (with 10% BNB discount)
+Maker Fee (Limit Order): 0.018% (with 10% BNB discount)
+Crucial Insight: Being a "Taker" is 2.5 times more expensive than being a "Maker". Your strategy should prioritize using limit orders to enter and exit positions to minimize these costs. A strategy that looks profitable with Maker fees can easily become unprofitable with Taker fees.
+Example Calculation (Round Trip on a $10,000 position, as a Taker):
+Entry Leg A: $10,000 * 0.045% = $4.50
+Entry Leg B: $10,000 * 0.045% = $4.50
+Exit Leg A: $10,000 * 0.045% = $4.50
+Exit Leg B: $10,000 * 0.045% = $4.50
+Total Trading Cost: $18.00
+
+2. Funding Rate Payments
+This is the ongoing cost/profit of holding your positions. It's exchanged every 8 hours.
+If Funding Rate is Positive: Longs pay Shorts.
+If Funding Rate is Negative: Shorts pay Longs.
+Example Calculation (Holding a position for 24 hours):
+You are Long $10,000 of AVAXUSDT (Funding Rate: +0.01%)
+You are Short $10,000 of SOLUSDT (Funding Rate: +0.02%)
+AVAX Leg (Long): You PAY. Cost per 8h = $10,000 * 0.01% = $1.00. Total for 24h = $3.00
+SOL Leg (Short): You RECEIVE. Income per 8h = $10,000 * 0.02% = $2.00. Total for 24h = $6.00
+Net Funding P&L for 24h: $3.00
+
+3. Liquidation Fees
+This is the penalty fee Binance charges if your position is forcibly closed (liquidated) because you ran out of margin.
+What it is: A small percentage of the value of your liquidated position. The exact fee varies by asset but is typically around 0.5% to 2.0%.
+Why it Matters: It's a final, painful cost on top of losing your entire position's margin. It's the "game over" fee. Your entire strategy must be built to avoid this at all costs.
