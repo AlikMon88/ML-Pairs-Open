@@ -4,6 +4,12 @@ from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import minimize
+from collections import defaultdict
+
+
+'''
+Portfolio: Constructs a 'Core-Satellite' based portfolio combining alpha + beta to maximize returns
+'''
 
 
 class SignalPortfolio:
@@ -505,6 +511,55 @@ class SignalPortfolioConstrained:
             'sharpe_ratio': sharpe,
             'max_drawdown': mdd
         }
+    
+    
+## -------------------------------------------------------------------------
+## Generalized Portfolio Framework.
+## -------------------------------------------------------------------------
+
+class PortfolioConstructor:
+    """
+    Blends independent alpha and beta signals into a single target portfolio.
+    This module defines the firm's strategic asset allocation.
+    """
+    def __init__(self, alpha_allocation: float, beta_allocation: float, beta_basket: list):
+        self.alpha_alloc = alpha_allocation
+        self.beta_alloc = beta_allocation
+        self.beta_basket = beta_basket
+        assert 0.0 <= alpha_allocation + beta_allocation <= 1.0, "Allocations must be valid"
+
+    def construct_target_weights(self, alpha_signals: dict, beta_signal: float) -> dict:
+        """
+        Combines the signals into target portfolio weights.
+
+        Args:
+            alpha_signals: The {-1, 0, 1} signals from the Alpha Generator.
+            beta_signal: The {0, 1} signal from the Beta Generator.
+
+        Returns:
+            dict: The blended target weights, e.g., {'BTCUSDT': 0.6, 'ETHUSDT': -0.4}.
+        """
+        final_weights = defaultdict(float)
+
+        # 1. Size the Alpha (Pairs Trading) Component using Risk Parity (Inverse Volatility)
+        # For simplicity, we'll equally weight the active signals for now.
+        active_alpha_signals = {p: s for p, s in alpha_signals.items() if s != 0}
+        if active_alpha_signals:
+            weight_per_signal = self.alpha_alloc / len(active_alpha_signals)
+            for pair, signal in active_alpha_signals.items():
+                # In a real model, you'd split this weight across the two legs of the pair.
+                # e.g., pair = "BTCUSDT-ETHUSDT"
+                asset1, asset2 = pair.split('-')
+                final_weights[asset1] += weight_per_signal * signal
+                final_weights[asset2] -= weight_per_signal * signal # Assuming hedge ratio of 1
+
+        # 2. Size the Beta Component
+        if beta_signal > 0:
+            beta_weight_per_asset = (self.beta_alloc * beta_signal) / len(self.beta_basket)
+            for asset in self.beta_basket:
+                final_weights[asset] += beta_weight_per_asset
+
+        return dict(final_weights)
     
 
 if __name__ == '__main__':
