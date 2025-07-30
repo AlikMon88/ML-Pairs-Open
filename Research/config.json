@@ -1,3 +1,12 @@
 {
-    "local-id": 245241216
+  "eq_tmp_fields": ["TRDPRC_1", "OPEN_PRC", "HIGH_1", "LOW_1", "ACVOL_UNS"],
+  "eq_benchmark": ["SPY"],
+  "cryp_tmp_fields": ["close", "open", "high", "low", "volume"],
+  "cryp_benchmark": ["BTC/USDT"],
+  "start": "2021-01-01",
+  "end": "2024-12-31",
+  "day_limit": 252,
+  "variance_perc": 0.9,
+  "cluster_distance_threshold": null,
+  "cluster_percentile": 20
 }

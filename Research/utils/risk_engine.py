@@ -51,7 +51,8 @@ class RiskManager:
         self.max_concentration = max_concentration
         self.max_drawdown = max_portfolio_drawdown
 
-    def manage_weights(self, target_weights: dict, portfolio_state: dict) -> dict:
+    def manage_weights(self, target_weights: dict, portfolio_state: dict):
+        
         """
         Adjusts target weights to comply with risk rules.
 
@@ -62,6 +63,7 @@ class RiskManager:
         Returns:
             dict: The final, risk-approved target weights.
         """
+        
         # Rule 1: Max Drawdown "Kill Switch"
         if portfolio_state.get('drawdown', 0) > self.max_drawdown:
             return {asset: 0.0 for asset in target_weights} # Exit all positions

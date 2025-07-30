@@ -9,7 +9,7 @@ class SimpleMarketBeta:
         self.market_proxy = market_proxy
         self.long_term_ma = long_term_ma
 
-    def generate_signal(self, timestamp: pd.Timestamp) -> float:
+    def generate_signal(self, timestamp: pd.Timestamp):
         """
         Determines if the market is in a long-term uptrend.
 

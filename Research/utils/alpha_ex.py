@@ -1,3 +1,6 @@
+import pandas as pd
+import numpy as np
+import random
 
 class PairsTradingAlpha:
     """
@@ -11,7 +14,7 @@ class PairsTradingAlpha:
         self.exit_z = exit_z
         self.z_scores = self._precompute_z_scores()
 
-    def _precompute_z_scores(self) -> dict:
+    def _precompute_z_scores(self):
         """Pre-calculates Z-scores for efficiency."""
         z_scores = {}
         for pair, data in self.pairs_data.items():
@@ -21,7 +24,7 @@ class PairsTradingAlpha:
             z_scores[pair] = (spread - mean) / std
         return z_scores
 
-    def generate_signal(self, timestamp: pd.Timestamp, current_positions: dict) -> dict:
+    def generate_signal(self, timestamp: pd.Timestamp, current_positions: dict):
         """
         For a given timestamp, determine the ideal target position.
 
@@ -52,3 +55,4 @@ class PairsTradingAlpha:
             target_positions[pair] = target_pos
             
         return target_positions
+        

@@ -518,17 +518,20 @@ class SignalPortfolioConstrained:
 ## -------------------------------------------------------------------------
 
 class PortfolioConstructor:
+    
     """
     Blends independent alpha and beta signals into a single target portfolio.
     This module defines the firm's strategic asset allocation.
     """
+    
     def __init__(self, alpha_allocation: float, beta_allocation: float, beta_basket: list):
         self.alpha_alloc = alpha_allocation
         self.beta_alloc = beta_allocation
         self.beta_basket = beta_basket
         assert 0.0 <= alpha_allocation + beta_allocation <= 1.0, "Allocations must be valid"
 
-    def construct_target_weights(self, alpha_signals: dict, beta_signal: float) -> dict:
+    def construct_target_weights(self, alpha_signals: dict, beta_signal: float):
+
         """
         Combines the signals into target portfolio weights.
 
@@ -539,6 +542,7 @@ class PortfolioConstructor:
         Returns:
             dict: The blended target weights, e.g., {'BTCUSDT': 0.6, 'ETHUSDT': -0.4}.
         """
+
         final_weights = defaultdict(float)
 
         # 1. Size the Alpha (Pairs Trading) Component using Risk Parity (Inverse Volatility)

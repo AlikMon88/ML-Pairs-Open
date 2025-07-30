@@ -4,6 +4,9 @@
 A 'Generalized' BackTesting Framework that interfaces with any strategy from 'Porfolio' class
 '''
 
+import pandas as pd
+
+### Generalized Equitites Fees-Model
 class BacktestingEngine:
     def run_backtest(self, market_data, alpha_module, beta_module, constructor_module, risk_module):
         """
@@ -34,7 +37,7 @@ class BacktestingEngine:
             
         return portfolio_history
     
-    
+### Fees-Model for BinanceEx/HyperLiquid Perp. Contract 
 class PerpetualFuturesBacktester:
     """
     Orchestrates the backtest, simulating trade execution and P&L.
@@ -43,21 +46,21 @@ class PerpetualFuturesBacktester:
         self.capital = initial_capital
         self.fee = fee # Taker fee e.g., 0.00045
 
-    def run(self, market_data: pd.DataFrame, funding_data: pd.DataFrame, orchestrator: callable):
+    def run(self, data: pd.DataFrame, funding_data: pd.DataFrame, orchestrator: callable):
         """
         Loops through time to simulate the full strategy.
 
         Args:
-            market_data: DataFrame of prices.
+            data: DataFrame of prices.
             funding_data: DataFrame of funding rates.
             orchestrator: A function that wires together all the previous modules.
         """
         equity_curve = [self.capital]
         current_positions = {} # e.g., {'BTCUSDT': 1.5} size in asset
 
-        for timestamp in market_data.index[1:]:
+        for timestamp in data.index[1:]:
             # The orchestrator function would call alpha, beta, constructor, and risk modules
-            final_target_weights = orchestrator(timestamp, market_data.loc[:timestamp])
+            final_target_weights = orchestrator(timestamp, data.loc[:timestamp])
             
             # --- P&L and Execution Logic ---
             # 1. Calculate P&L from existing positions (mark-to-market).
@@ -70,4 +73,4 @@ class PerpetualFuturesBacktester:
             # equity_curve.append(self.capital) 
             pass
 
-        return pd.Series(equity_curve, index=market_data.index)
+        return pd.Series(equity_curve, index=data.index)
