@@ -5,45 +5,46 @@ Risk-Engine:
 We put constraints (Volume, Liquidity) / Target-Locking / Drawdown exits 
 '''
 
-class RiskManager:
-    def __init__(self, risk_params):
-        self.max_drawdown = risk_params['max_drawdown']
-        self.max_concentration = risk_params['max_concentration']
-        self.volatility_target = risk_params['volatility_target']
+# class RiskManager:
+#     def __init__(self, risk_params):
+#         self.max_drawdown = risk_params['max_drawdown']
+#         self.max_concentration = risk_params['max_concentration']
+#         self.volatility_target = risk_params['volatility_target']
 
-    def manage_portfolio(self, ideal_weights, current_portfolio_state):
-        """
-        Takes ideal weights and applies risk rules to produce final target weights.
+#     def manage_portfolio(self, ideal_weights, current_portfolio_state):
+#         """
+#         Takes ideal weights and applies risk rules to produce final target weights.
         
-        Args:
-            ideal_weights (dict): The output from the Alpha module.
-            current_portfolio_state (dict): Contains current equity, P&L, open positions, etc.
+#         Args:
+#             ideal_weights (dict): The output from the Alpha module.
+#             current_portfolio_state (dict): Contains current equity, P&L, open positions, etc.
             
-        Returns:
-            dict: The final, risk-adjusted target weights.
-        """
-        # 1. Check for portfolio-level kill switch
-        if current_portfolio_state['drawdown'] > self.max_drawdown:
-            return {}  # Return empty dict, meaning "exit all positions"
+#         Returns:
+#             dict: The final, risk-adjusted target weights.
+#         """
+#         # 1. Check for portfolio-level kill switch
+#         if current_portfolio_state['drawdown'] > self.max_drawdown:
+#             return {}  # Return empty dict, meaning "exit all positions"
 
-        final_weights = ideal_weights.copy()
+#         final_weights = ideal_weights.copy()
         
-        # 2. Apply concentration limits
-        for asset, weight in final_weights.items():
-            if abs(weight) > self.max_concentration:
-                final_weights[asset] = self.max_concentration * (1 if weight > 0 else -1)
+#         # 2. Apply concentration limits
+#         for asset, weight in final_weights.items():
+#             if abs(weight) > self.max_concentration:
+#                 final_weights[asset] = self.max_concentration * (1 if weight > 0 else -1)
                 
-        # 3. Apply volatility targeting (simplified example)
-        # This is where you would calculate position sizes based on volatility.
-        # For now, we'll just use the concentration-capped weights.
+#         # 3. Apply volatility targeting (simplified example)
+#         # This is where you would calculate position sizes based on volatility.
+#         # For now, we'll just use the concentration-capped weights.
         
-        # ... more sophisticated logic here ...
+#         # ... more sophisticated logic here ...
         
-        return final_weights
+#         return final_weights
     
 class RiskManager:
     """
-    Applies portfolio-level risk constraints to target weights.
+    Applies portfolio-level risk constraints to the *total proposed portfolio*,
+    considering both existing positions and new target weights.
     This module acts as a final safety check.
     """
     def __init__(self, max_leverage: float, max_concentration: float, max_portfolio_drawdown: float):
@@ -52,32 +53,48 @@ class RiskManager:
         self.max_drawdown = max_portfolio_drawdown
 
     def manage_weights(self, target_weights: dict, portfolio_state: dict):
-        
         """
-        Adjusts target weights to comply with risk rules.
+        Adjusts target weights to comply with risk rules by evaluating the final combined portfolio.
 
         Args:
-            target_weights: The blended weights from the Portfolio Constructor.
-            portfolio_state: Contains current equity, drawdown, positions, etc.
+            target_weights: The ideal weights for assets targeted by new signals.
+            portfolio_state: The complete current state of the portfolio (equity, positions, etc.).
 
         Returns:
-            dict: The final, risk-approved target weights.
+            dict: The final, risk-approved target weights for the entire portfolio.
         """
         
-        # Rule 1: Max Drawdown "Kill Switch"
+        # Rule 1: Max Drawdown "Kill Switch" - This rule is stateful and correct as is.
         if portfolio_state.get('drawdown', 0) > self.max_drawdown:
-            return {asset: 0.0 for asset in target_weights} # Exit all positions
+            # Generate zero-weight targets for ALL existing positions to signal a full exit.
+            all_assets_to_close = list(portfolio_state.get('positions', {}).keys())
+            return {asset: 0.0 for asset in all_assets_to_close}
 
-        final_weights = target_weights.copy()
+        # --- CORE CORRECTION: Create a complete picture of the proposed portfolio ---
+        # 1. Start with the current positions, converted to weights.
+        equity = portfolio_state.get('equity', 1) # Avoid division by zero
+        proposed_weights = {
+            asset: pos_data['value'] / equity
+            for asset, pos_data in portfolio_state.get('positions', {}).items()
+        }
+
+        # 2. Update with new targets. This correctly reflects the desired *final* state.
+        # If an asset is already in a position, its weight is overwritten by the new target.
+        # If the target is for a new asset, it's added to the portfolio.
+        proposed_weights.update(target_weights)
+
+        # Now, apply all subsequent risk checks to this complete 'proposed_weights' dictionary.
+        final_weights = proposed_weights.copy()
         
-        # Rule 2: Concentration Limit
+        # Rule 2: Concentration Limit (Applied to the total proposed position)
         for asset, weight in final_weights.items():
             if abs(weight) > self.max_concentration:
                 final_weights[asset] = self.max_concentration * (1 if weight > 0 else -1)
         
-        # Rule 3: Leverage Limit
+        # Rule 3: Leverage Limit (Applied to the total proposed portfolio)
         total_leverage = sum(abs(w) for w in final_weights.values())
         if total_leverage > self.max_leverage:
+            # If leverage is breached, scale down the *entire* proposed portfolio proportionally.
             scaling_factor = self.max_leverage / total_leverage
             final_weights = {asset: w * scaling_factor for asset, w in final_weights.items()}
             
