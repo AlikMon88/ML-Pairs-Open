@@ -2,7 +2,6 @@
 
 import pandas as pd
 import numpy as np
-from binance.client import Client
 
 class FeesModel():
     def __init__(self):
@@ -19,7 +18,7 @@ class FeesModel():
         
         
     ### Get Funding-Fees
-    def get_funding_rate_history(client, symbols, start_str, end_str):
+    def get_funding_rate_history(self, client, symbols, start_str, end_str):
         
         """
         Fetches historical funding rate data for multiple symbols and formats it
@@ -40,15 +39,16 @@ class FeesModel():
         all_funding_data = []
         
         # Convert string dates to milliseconds for the API
-        start_ms = start_str
-        end_ms = end_str
+        start_ms = int(start_str.timestamp() * 1000)
+        end_ms = int(end_str.timestamp() * 1000)
 
         for symbol in symbols:
+            symbol = "".join(symbol.split('/'))
             print(f"  - Fetching for {symbol}")
             # The API returns a max of 1000 records per call, so we loop if needed
             # For simplicity, this example assumes one call is enough. A robust version
             # would loop until all data in the date range is retrieved.
-            data = client.funding_rate_history(
+            data = client.futures_funding_rate(
                 symbol=symbol, 
                 startTime=start_ms, 
                 endTime=end_ms, 
@@ -71,20 +71,41 @@ class FeesModel():
         # Keep only the columns we need
         df = df[['symbol', 'fundingTime', 'fundingRate']]
         
-        # Pivot the DataFrame to get the desired format
-        # Index = timestamp, Columns = symbols
-        pivoted_df = df.pivot(index='fundingTime', columns='symbol', values='fundingRate')
+        # --- Aggregation to Daily Frequency ---
+        df['date'] = df['fundingTime'].dt.date
+        daily_funding_sum = df.groupby(['symbol', 'date'])['fundingRate'].sum().reset_index()
         
-        # Reindex to match your hourly market data, and forward-fill the values
-        # The funding rate is constant between funding events.
-        full_date_range = pd.date_range(start=start_str, end=end_str, freq='H') # Assuming hourly data
-        pivoted_df = pivoted_df.reindex(full_date_range).ffill()
+        # Convert date column back to datetime objects for proper indexing
+        daily_funding_sum['date'] = pd.to_datetime(daily_funding_sum['date'])
         
-        # Fill any remaining NaNs at the beginning with 0
-        pivoted_df.fillna(0, inplace=True)
+        # 1. Create the full daily date range for the backtest
+        full_date_range = pd.date_range(start=start_str, end=end_str, freq='D')
+        
+        # 2. Get the unique list of symbols we have data for
+        symbols = df['symbol'].unique()
+        
+        # 3. Create the full cartesian product of symbols and dates
+        multi_index = pd.MultiIndex.from_product(
+            [symbols, full_date_range], 
+            names=['symbol', 'date']
+        )
+        
+        # 4. Create the final DataFrame with this complete index
+        final_df = pd.DataFrame(index=multi_index)
 
-        print("Funding data successfully loaded and formatted.")
-        return pivoted_df
+        # 5. Set the index of our calculated data to match for merging
+        daily_funding_sum.set_index(['symbol', 'date'], inplace=True)
+        
+        # 6. Join our calculated sums onto the complete index
+        final_df = final_df.join(daily_funding_sum)
+        
+        # 7. Fill missing values with 0. Days with no funding events have zero cost.
+        final_df['fundingRate'].fillna(0, inplace=True)
+        
+        # The result is a long-format, multi-indexed DataFrame ready for use.
+        print("Funding data successfully aggregated to daily and multi-indexed.")
+        return final_df
+        
     
 if __name__ == '__main__':
     print('Trading-Fees-Estimator (Binance-EX/HyperLiquid) ...')
