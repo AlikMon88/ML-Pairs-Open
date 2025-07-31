@@ -20,6 +20,8 @@ class SimpleMarketBeta:
             float: 1.0 for beta exposure, 0.0 for no beta exposure.
         """
         market_series = self.market_proxy.loc[:timestamp]
+        
+        ## Not-Enogh data
         if len(market_series) < self.long_term_ma:
             return 0.0
 
