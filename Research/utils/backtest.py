@@ -42,10 +42,11 @@ class PerpetualFuturesBacktester:
     """
     Orchestrates the backtest, simulating trade execution and P&L.
     """
-    def __init__(self, initial_capital: float, fee: float):
+    def __init__(self, initial_capital, fee, pairs):
         self.capital = initial_capital
         self.fee = fee # Taker fee e.g., 0.00045
-
+        self.pairs = pairs
+        
     def run(self, data: pd.DataFrame, funding_data: pd.DataFrame, orchestrator: callable):
         """
         Loops through time to simulate the full strategy.

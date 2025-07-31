@@ -263,14 +263,19 @@ def data_clean(df_uni, stocks, history_limit, type='cryp', fund_df=None, is_plot
     if fund_df is not None:
         _elem_stocks = []
     
+    stocks_tmp = []
     for i, nm in enumerate(stocks):
         
         df = df_uni.loc[nm]
         
+        if df.index[-1] != pd.Timestamp.today().normalize():
+            print(f'token {nm} de-listed!')
+            continue
+            
         if len(df) > history_limit:
             error_close = df.copy().close.ffill().bfill()
             correction_count += 1
-    
+        
         df = df[~df.index.duplicated(keep='first')] ## again-duplicate filtering - API feed call problem
         
         if correction_count == 1:
@@ -324,7 +329,9 @@ def data_clean(df_uni, stocks, history_limit, type='cryp', fund_df=None, is_plot
             plt.tight_layout(pad = 2)
             plt.show()
     
+        stocks_tmp.append(nm)
+        
     lt = time.time()
     print('time-taken for data-cleaning: ', (lt - ft)/60, ' mins')
     
-    return val_arr
+    return val_arr, stocks_tmp

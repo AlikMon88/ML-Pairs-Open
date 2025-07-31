@@ -72,12 +72,17 @@ class FactorModelPairs():
     
     def create_pairs(self, cluster_labels, df_uni):
         ## perform cointegration
-        pairs = SelectCointegratedPairs(symbols=self.stocks, cluster_labels=self.cluster_labels, history=df_uni)
-        print('Number of Pairs Found: ', len(self.pairs.keys()))
+        pairs = SelectCointegratedPairs(symbols=self.stocks, cluster_labels=cluster_labels, history=df_uni)
+        print('Number of Pairs Found: ', len(pairs.keys()))
 
         return pairs
     
-    def run(self, val_arr, df_uni):
+    def run(self, val_arr, df_uni, start_time, start_time_index):
+        
+        ## decomposition, clustering, cointegration-test should take place from historical-data before start-time 
+        val_arr = val_arr[:, :start_time_index]
+        df_uni = df_uni[df_uni.index.get_level_values('datetime') < start_time].copy()
+        
         pca_arr = self.decomp(val_arr)
         cluster_labels = self.create_clusters(pca_arr)
         pairs = self.create_pairs(cluster_labels, df_uni)
