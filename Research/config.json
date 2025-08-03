@@ -25,9 +25,9 @@
       "alpha_allocation": 0.7,
       "beta_allocation": 0.3,
       "beta_basket": [
-        "BTCUSDT",
-        "ETHUSDT",
-        "SOLUSDT"
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
       ]
     }
   }

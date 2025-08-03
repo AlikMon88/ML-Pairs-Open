@@ -593,7 +593,7 @@ class PortfolioConstructor:
     def _compute_asset_beta(self, asset_symbol: str, timestamp: pd.Timestamp):
         """Computes beta for a single asset against the market proxy."""
         # For simplicity, using a fixed market proxy. A more advanced version could use a dynamic index.
-        market_returns = self.market_data.close.pct_change()
+        market_returns = self.market_data.pct_change()
         asset_returns = self.history_data.loc[asset_symbol].close.pct_change()
         
         # Align data up to the current timestamp
@@ -696,12 +696,12 @@ class PortfolioConstructor:
             final_pair_weight = self.alpha_alloc * pair_weight * pair_signal
            
             # Decompose into asset legs (simplified equal-dollar split)
-            asset1, asset2 = self.pairs_data.loc[pair]['symbol_x'], self.pairs_data.loc[pair]['symbol_y']
+            asset1, asset2 = self.pairs_data[pair]['symbol_x'], self.pairs_data[pair]['symbol_y']
             final_weights[asset1] += final_pair_weight / 2
             final_weights[asset2] -= final_pair_weight / 2
 
         # === BETA PORTFOLIO CONSTRUCTION ===
-        if beta_signal > 0:
+        if beta_signal != 0:
             total_beta_weight = self.beta_alloc * beta_signal
             beta_weight_per_asset = total_beta_weight / len(self.beta_basket)
             for asset in self.beta_basket:
