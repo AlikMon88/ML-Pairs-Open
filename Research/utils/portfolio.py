@@ -525,7 +525,7 @@ class PortfolioConstructor:
     strategic beta overlay.
     """
     
-    def __init__(self, pairs_data: dict, market_data: pd.DataFrame, config: dict):
+    def __init__(self, pairs_data: dict, history_data: pd.DataFrame, market_data: pd.DataFrame, config: dict):
         """
         Initializes the constructor with all necessary data and configuration.
 
@@ -537,6 +537,7 @@ class PortfolioConstructor:
         
         # Data
         self.pairs_data = pairs_data
+        self.history_data = history_data
         self.market_data = market_data
         self.returns = self._compute_spread_returns()
 
@@ -592,8 +593,8 @@ class PortfolioConstructor:
     def _compute_asset_beta(self, asset_symbol: str, timestamp: pd.Timestamp):
         """Computes beta for a single asset against the market proxy."""
         # For simplicity, using a fixed market proxy. A more advanced version could use a dynamic index.
-        market_returns = self.market_data[('BTCUSDT', 'close')].pct_change()
-        asset_returns = self.market_data[(asset_symbol, 'close')].pct_change()
+        market_returns = self.market_data.close.pct_change()
+        asset_returns = self.history_data.loc[asset_symbol].close.pct_change()
         
         # Align data up to the current timestamp
         combined = pd.concat([asset_returns, market_returns], axis=1).dropna()
@@ -631,8 +632,24 @@ class PortfolioConstructor:
             effective_betas.append(beta_spread)
 
             # ADV
-            adv_x = self.market_data[(asset_x, 'volume')].loc[:timestamp].tail(30).mean()
-            adv_y = self.market_data[(asset_y, 'volume')].loc[:timestamp].tail(30).mean()
+            # adv_x = self.history_data[(asset_x, 'volume')].loc[:timestamp].tail(30).mean()
+            # adv_y = self.history_data[(asset_y, 'volume')].loc[:timestamp].tail(30).mean()
+            
+            # ADV
+            adv_x = (
+                self.history_data.loc[asset_x]
+                .loc[:timestamp, 'volume']
+                .tail(30)
+                .mean()
+            )
+
+            adv_y = (
+                self.history_data.loc[asset_y]
+                .loc[:timestamp, 'volume']
+                .tail(30)
+                .mean()
+            )
+ 
             # Note: initial_amount should be passed in or stored in config
             max_trade_val = self.max_adv_fraction * min(adv_x, adv_y)
             adv_limits.append(max_trade_val / 100000) # Placeholder equity

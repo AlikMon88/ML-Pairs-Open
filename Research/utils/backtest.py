@@ -5,38 +5,8 @@ A 'Generalized' BackTesting Framework that interfaces with any strategy from 'Po
 '''
 
 import pandas as pd
-
-### Generalized Equitites Fees-Model
-class BacktestingEngine:
-    def run_backtest(self, market_data, alpha_module, beta_module, constructor_module, risk_module):
-        """
-        Orchestrates the full Core-Satellite backtest.
-        """
-        # ... setup ...
-
-        for timestamp, current_prices in market_data.iterrows():
-            
-            # Station 1 & 2: Generate independent signals
-            ideal_alpha_weights = alpha_module.generate_signals(current_prices)
-            beta_signal_strength = beta_module.generate_beta_signal(market_data.loc[:timestamp]) # Pass historical data
-            
-            # Station 3: Blend the signals into a target portfolio
-            blended_target_weights = constructor_module.construct_target_portfolio(
-                ideal_alpha_weights, 
-                beta_signal_strength
-            )
-            
-            # Station 4: Apply final risk overlays
-            final_trade_weights = risk_module.manage_portfolio(
-                blended_target_weights, 
-                current_portfolio_state
-            )
-            
-            # Station 5: Execute and calculate P&L
-            # ... update portfolio based on final_trade_weights ...
-            
-        return portfolio_history
-
+import random 
+import numpy as np
     
 ### Fees-Model for BinanceEx/HyperLiquid Perp. Contract 
 class PerpetualFuturesBacktester:
@@ -52,7 +22,7 @@ class PerpetualFuturesBacktester:
         self.execution_fee = self.fees['taker'] # Assume worst-case execution for backtesting
 
     def run(self, 
-            market_data: pd.DataFrame, 
+            history_data: pd.DataFrame, 
             funding_data: pd.DataFrame, 
             orchestrator: callable):
         
@@ -60,7 +30,7 @@ class PerpetualFuturesBacktester:
         Loops through time to simulate the full strategy.
 
         Args:
-            market_data: Multi-level column DataFrame of prices, e.g., ('BTCUSDT', 'close').
+            history_data: Multi-level column DataFrame of prices, e.g., ('BTCUSDT', 'close').
             funding_data: DataFrame of funding rates for each asset.
             orchestrator: A function that wires together all the previous modules.
         """
@@ -74,13 +44,21 @@ class PerpetualFuturesBacktester:
             "drawdown": 0.0
         }
         
-        equity_curve = pd.Series(index=market_data.index, dtype=float)
+        equity_curve = pd.Series(index=history_data.index, dtype=float)
         equity_curve.iloc[0] = self.initial_capital
 
+        rn = random.randint(0, len(history_data) - 1)
+        
+        print('Backtesting ...')
+        print('start-timestamp: ', history_data.index[rn][-1])
+        print('end-timestamp: ', history_data.index[-1][-1])
+        
+        alpha_signals, beta_signal = {}, 0
+        
         # --- Main Backtesting Loop ---
-        for i in range(1, len(market_data.index)):
-            timestamp = market_data.index[i]
-            prev_timestamp = market_data.index[i-1]
+        for i in range(rn, len(history_data.index)):
+            timestamp = history_data.index[i][-1]
+            prev_timestamp = history_data.index[i-1][-1]
             
             current_equity = portfolio_state['equity']
             pnl_from_price_change = 0.0
@@ -89,8 +67,12 @@ class PerpetualFuturesBacktester:
 
             # 1. Calculate P&L from existing positions (Mark-to-Market)
             for asset, pos_data in portfolio_state['positions'].items():
-                current_price = market_data.loc[timestamp][(asset, 'close')]
-                prev_price = market_data.loc[prev_timestamp][(asset, 'close')]
+                # current_price = history_dataloc[timestamp][(asset, 'close')]
+                current_price = history_data.loc[(asset, timestamp)].close
+                
+                # prev_price = history_dataloc[prev_timestamp][(asset, 'close')]
+                prev_price = history_data.loc[(asset, prev_timestamp)].close
+                
                 pnl_from_price_change += (current_price - prev_price) * pos_data['size']
 
             current_equity += pnl_from_price_change
@@ -98,8 +80,12 @@ class PerpetualFuturesBacktester:
             # 2. Calculate and subtract funding costs
             if timestamp in funding_data.index:
                 for asset, pos_data in portfolio_state['positions'].items():
-                    position_value = pos_data['size'] * market_data.loc[timestamp][(asset, 'close')]
-                    funding_rate = funding_data.loc[timestamp][asset]
+                    # position_value = pos_data['size'] * history_dataloc[timestamp][(asset, 'close')]
+                    position_value = pos_data['size'] * history_data.loc[(asset, timestamp)].close
+                    
+                    # funding_rate = funding_data.loc[timestamp][asset]
+                    funding_rate = funding_data.loc[(asset, timestamp)].fundingRate
+                    
                     # You PAY funding on long positions if rate is positive
                     # You RECEIVE funding on short positions if rate is positive
                     funding_payment = position_value * funding_rate
@@ -114,13 +100,14 @@ class PerpetualFuturesBacktester:
 
             # --- Orchestration: Get Final Target Weights ---
             # The orchestrator function calls alpha, beta, constructor, and risk modules
-            final_target_weights = orchestrator(timestamp, portfolio_state, market_data.loc[:timestamp])
+            final_target_weights, alpha_signals, beta_signal = orchestrator(timestamp, portfolio_state, alpha_signals, beta_signal)
 
             # --- Rebalancing Logic ---
             # 3. Determine trades needed to rebalance to final_target_weights
             for asset in set(list(portfolio_state['positions'].keys()) + list(final_target_weights.keys())):
                 current_size = portfolio_state['positions'].get(asset, {}).get('size', 0.0)
-                current_price = market_data.loc[timestamp][(asset, 'close')]
+                # current_price = history_dataloc[timestamp][(asset, 'close')]
+                current_price = history_data.loc[(asset, timestamp)].close
                 
                 target_weight = final_target_weights.get(asset, 0.0)
                 target_value = target_weight * current_equity
