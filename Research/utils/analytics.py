@@ -3,46 +3,137 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.linear_model import LinearRegression
 
 class PortfolioAnalytics:
     """
-    Calculates and visualizes portfolio performance metrics.
+    Calculates and visualizes portfolio performance metrics based on an equity curve.
+    This class is strategy-agnostic.
     """
-    def __init__(self, equity_curve: pd.Series):
-        self.equity_curve = equity_curve
+    def __init__(self, equity_curve: pd.Series, periods_per_year: int = 252):
+        """
+        Args:
+            equity_curve: A pandas Series representing the portfolio value over time.
+            periods_per_year: The number of trading periods in a year for annualization.
+                              (e.g., 252 for daily, 252*24 for hourly, 12 for monthly).
+        """
+        if equity_curve.empty or len(equity_curve) < 2:
+            raise ValueError("Equity curve must not be empty and must have at least two data points.")
+            
+        self.equity_curve = equity_curve.dropna()
         self.returns = self.equity_curve.pct_change().dropna()
+        self.periods_per_year = periods_per_year
 
-    def calculate_sharpe_ratio(self, risk_free_rate: float = 0.0) -> float:
+    def calculate_sharpe_ratio(self, risk_free_rate: float = 0.0):
         """Calculates the annualized Sharpe ratio."""
-        # Assuming hourly returns, 252 * 24 trading hours in a year
-        trading_hours_per_year = 252 * 24
-        excess_returns = self.returns - risk_free_rate / trading_hours_per_year
-        return np.sqrt(trading_hours_per_year) * excess_returns.mean() / excess_returns.std()
+        if self.returns.std() == 0:
+            return 0.0
+        
+        excess_returns = self.returns - (risk_free_rate / self.periods_per_year)
+        return np.sqrt(self.periods_per_year) * excess_returns.mean() / excess_returns.std()
 
-    def calculate_max_drawdown(self) -> float:
+    def calculate_sortino_ratio(self, risk_free_rate: float = 0.0):
+        """Calculates the annualized Sortino ratio."""
+        excess_returns = self.returns - (risk_free_rate / self.periods_per_year)
+        downside_std = excess_returns[excess_returns < 0].std()
+        
+        if downside_std == 0:
+            return np.inf
+        
+        return np.sqrt(self.periods_per_year) * excess_returns.mean() / downside_std
+
+    def calculate_max_drawdown(self):
         """Calculates the maximum drawdown."""
         running_max = self.equity_curve.cummax()
         drawdown = (self.equity_curve - running_max) / running_max
         return drawdown.min()
+    
+    def calculate_cagr(self):
+        """Calculates the Compound Annual Growth Rate."""
+        start_value = self.equity_curve.iloc[0]
+        end_value = self.equity_curve.iloc[-1]
+        num_years = len(self.equity_curve) / self.periods_per_year
+        return (end_value / start_value) ** (1 / num_years) - 1
+
+    def calculate_beta_and_alpha(self, market_returns: pd.Series):
+        """Calculates the portfolio's beta and annualized alpha against a market benchmark."""
+        # Align the portfolio returns with the market returns
+        df = pd.concat([self.returns, market_returns], axis=1).dropna()
+        
+        X = df.iloc[:, 1].values.reshape(-1, 1) # Market returns
+        y = df.iloc[:, 0].values                # Portfolio returns
+        
+        model = LinearRegression().fit(X, y)
+        beta = model.coef_[0]
+        
+        # Alpha is the intercept, annualized
+        daily_alpha = model.intercept_
+        annualized_alpha = (1 + daily_alpha)**self.periods_per_year - 1
+        
+        return beta, annualized_alpha
+
+    def display_summary(self, market_returns: pd.Series = None):
+        """Prints a comprehensive summary of key performance metrics."""
+        sharpe = self.calculate_sharpe_ratio()
+        sortino = self.calculate_sortino_ratio()
+        mdd = self.calculate_max_drawdown()
+        cagr = self.calculate_cagr()
+        
+        print("--- Performance Summary ---")
+        print(f"Start Date: {self.equity_curve.index[0].strftime('%Y-%m-%d')}")
+        print(f"End Date: {self.equity_curve.index[-1].strftime('%Y-%m-%d')}")
+        print(f"Final Portfolio Value: ${self.equity_curve.iloc[-1]:,.2f}")
+        print("-" * 27)
+        print(f"Compound Annual Growth Rate (CAGR): {cagr:.2%}")
+        print(f"Annualized Sharpe Ratio: {sharpe:.2f}")
+        print(f"Annualized Sortino Ratio: {sortino:.2f}")
+        print(f"Maximum Drawdown: {mdd:.2%}")
+
+        if market_returns is not None:
+            beta, alpha = self.calculate_beta_and_alpha(market_returns)
+            print("-" * 27)
+            print(f"Market Beta: {beta:.2f}")
+            print(f"Annualized Alpha: {alpha:.2%}")
+
+        print("---------------------------")
+        self.plot_equity_curve()
 
     def plot_equity_curve(self):
         """Plots the portfolio value over time."""
-        plt.figure(figsize=(12, 6))
-        sns.lineplot(data=self.equity_curve)
-        plt.title('Portfolio Equity Curve')
-        plt.xlabel('Date')
-        plt.ylabel('Portfolio Value ($)')
-        plt.grid(True)
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        self.equity_curve.plot(ax=ax, label='Portfolio Equity')
+        
+        ax.set_title('Portfolio Performance', fontsize=16)
+        ax.set_xlabel('Date')
+        ax.set_ylabel('Portfolio Value ($)')
+        ax.legend()
+        plt.tight_layout()
         plt.show()
 
-    def display_summary(self):
-        """Prints a summary of key performance metrics."""
-        sharpe = self.calculate_sharpe_ratio()
-        mdd = self.calculate_max_drawdown()
+    def plot_rolling_sharpe(self, window: int = None):
+        """Plots the rolling annualized Sharpe ratio."""
+        if window is None:
+            window = self.periods_per_year # Default to a 1-year rolling window
+            
+        rolling_sharpe = self.returns.rolling(window=window).apply(
+            lambda x: np.sqrt(self.periods_per_year) * x.mean() / x.std() if x.std() != 0 else 0,
+            raw=True
+        )
         
-        print("--- Performance Summary ---")
-        print(f"Final Portfolio Value: ${self.equity_curve.iloc[-1]:,.2f}")
-        print(f"Annualized Sharpe Ratio: {sharpe:.2f}")
-        print(f"Maximum Drawdown: {mdd:.2%}")
-        print("---------------------------")
-        self.plot_equity_curve()
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        rolling_sharpe.plot(ax=ax, label=f'{window}-Period Rolling Sharpe')
+        ax.axhline(0, color='grey', linestyle='--')
+        ax.set_title('Rolling Sharpe Ratio', fontsize=16)
+        ax.set_xlabel('Date')
+        ax.set_ylabel('Annualized Sharpe Ratio')
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+        
+        
+if __name__ == '__main__':
+    print('running __analytics.py__')

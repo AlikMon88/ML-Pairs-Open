@@ -512,59 +512,182 @@ class SignalPortfolioConstrained:
             'max_drawdown': mdd
         }
     
-    
-## -------------------------------------------------------------------------
-## Generalized Portfolio Framework.
-## -------------------------------------------------------------------------
-
 class PortfolioConstructor:
-    
     """
-    Blends independent alpha and beta signals into a single target portfolio.
-    This module defines the firm's strategic asset allocation.
+    Constructs a complete portfolio by generating alpha signals, optimizing them
+    for beta-neutrality and other constraints, and then blending them with a
+    strategic beta overlay.
     """
     
-    def __init__(self, alpha_allocation: float, beta_allocation: float, beta_basket: list):
-        self.alpha_alloc = alpha_allocation
-        self.beta_alloc = beta_allocation
-        self.beta_basket = beta_basket
-        assert 0.0 <= alpha_allocation + beta_allocation <= 1.0, "Allocations must be valid"
-
-    def construct_target_weights(self, alpha_signals: dict, beta_signal: float):
-
+    def __init__(self, pairs_data: dict, market_data: pd.DataFrame, config: dict):
         """
-        Combines the signals into target portfolio weights.
+        Initializes the constructor with all necessary data and configuration.
 
         Args:
-            alpha_signals: The {-1, 0, 1} signals from the Alpha Generator.
-            beta_signal: The {0, 1} signal from the Beta Generator.
-
-        Returns:
-            dict: The blended target weights, e.g., {'BTCUSDT': 0.6, 'ETHUSDT': -0.4}.
+            pairs_data: Dict containing spread_series and hedge_ratios for each pair.
+            market_data: DataFrame of asset prices and volumes.
+            config: A dictionary containing all parameters.
         """
+        
+        # Data
+        self.pairs_data = pairs_data
+        self.market_data = market_data
+        self.returns = self._compute_spread_returns()
 
+        # Alpha Config
+        self.past_window = config['alpha']['past_window']
+        self.z_scores = self._compute_rolling_z_scores()
+
+        # Optimization Config
+        self.max_adv_fraction = config['optimizer']['max_adv_fraction']
+        self.target_beta = config['optimizer']['target_beta']
+        self.max_leverage_alpha = config['optimizer']['max_leverage_alpha']
+        
+        # Strategic Allocation Config
+        self.alpha_alloc = config['strategy']['alpha_allocation']
+        self.beta_alloc = config['strategy']['beta_allocation']
+        self.beta_basket = config['strategy']['beta_basket']
+        assert 0.0 <= self.alpha_alloc + self.beta_alloc, "Allocations must be valid."
+
+    # --- Step 1: Internal Helper Methods for Data Preparation ---
+    def _compute_spread_returns(self):
+        returns = {}
+        for pair, data in self.pairs_data.items():
+            returns[pair] = data['spread_series'].pct_change()
+        return returns
+
+    def _compute_rolling_z_scores(self):
+        z_scores = {}
+        for pair, data in self.pairs_data.items():
+            spread = data['spread_series']
+            mean = spread.rolling(window=self.past_window).mean()
+            std = spread.rolling(window=self.past_window).std()
+            z_scores[pair] = (spread - mean) / std
+        return z_scores
+
+    # --- Step 2: Internal Helper Methods for Optimization ---
+    def _compute_inverse_volatility_weights(self, active_pairs: list, timestamp: pd.Timestamp):
+        """Calculates initial weights for active pairs based on inverse volatility."""
+        if not active_pairs:
+            return {}
+        
+        volatilities = {}
+        for pair in active_pairs:
+            # Get returns in the lookback window up to the current timestamp
+            window_returns = self.returns[pair].loc[:timestamp].tail(self.past_window)
+            vol = window_returns.std()
+            volatilities[pair] = vol
+
+        inv_vol = {pair: 1 / vol for pair, vol in volatilities.items() if vol > 0}
+        total_inv_vol = sum(inv_vol.values())
+        
+        return {pair: inv_vol[pair] / total_inv_vol for pair in inv_vol} if total_inv_vol > 0 else {}
+
+    def _compute_asset_beta(self, asset_symbol: str, timestamp: pd.Timestamp):
+        """Computes beta for a single asset against the market proxy."""
+        # For simplicity, using a fixed market proxy. A more advanced version could use a dynamic index.
+        market_returns = self.market_data[('BTCUSDT', 'close')].pct_change()
+        asset_returns = self.market_data[(asset_symbol, 'close')].pct_change()
+        
+        # Align data up to the current timestamp
+        combined = pd.concat([asset_returns, market_returns], axis=1).dropna()
+        combined = combined.loc[:timestamp].tail(self.past_window) # Use rolling window for beta
+        
+        if len(combined) < 20: return 1.0 # Default to beta of 1 if not enough data
+        
+        X = combined.iloc[:, 1].values.reshape(-1, 1)
+        y = combined.iloc[:, 0].values
+        model = LinearRegression().fit(X, y)
+        return model.coef_[0]
+
+    def _optimize_alpha_weights(self, initial_weights: dict, timestamp: pd.Timestamp):
+        """
+        Runs the SLSQP optimizer to find beta-neutral weights that respect constraints.
+        This is the core of your 'adjust_weights_for_beta_neutrality' logic.
+        """
+        if not initial_weights:
+            return {}
+
+        active_pairs = list(initial_weights.keys())
+        target_weights = np.array([initial_weights[pair] for pair in active_pairs])
+
+        # --- Gather Constraints ---
+        effective_betas = []
+        adv_limits = []
+        for pair in active_pairs:
+            pair_info = self.pairs_data[pair]
+            asset_x, asset_y = pair_info['symbol_x'], pair_info['symbol_y']
+            
+            # Beta
+            beta_x = self._compute_asset_beta(asset_x, timestamp)
+            beta_y = self._compute_asset_beta(asset_y, timestamp)
+            beta_spread = beta_x - pair_info['hedge_ratio'] * beta_y
+            effective_betas.append(beta_spread)
+
+            # ADV
+            adv_x = self.market_data[(asset_x, 'volume')].loc[:timestamp].tail(30).mean()
+            adv_y = self.market_data[(asset_y, 'volume')].loc[:timestamp].tail(30).mean()
+            # Note: initial_amount should be passed in or stored in config
+            max_trade_val = self.max_adv_fraction * min(adv_x, adv_y)
+            adv_limits.append(max_trade_val / 100000) # Placeholder equity
+
+        # --- Define Optimization Problem ---
+        def objective(w):
+            return np.sum((w - target_weights)**2)
+
+        def leverage_constraint(w):
+            return self.max_leverage_alpha - np.sum(np.abs(w))
+
+        def beta_constraint(w):
+            return self.target_beta - np.dot(w, effective_betas)
+
+        constraints = [{'type': 'ineq', 'fun': leverage_constraint},
+                       {'type': 'eq', 'fun': beta_constraint}]
+        bounds = [(-lim, lim) for lim in adv_limits]
+        
+        result = minimize(objective, target_weights, method='SLSQP', bounds=bounds, constraints=constraints)
+        
+        if not result.success:
+            # Fallback strategy: return an empty dict if optimization fails
+            print(f"Optimization failed at {timestamp}: {result.message}")
+            return {}
+
+        return dict(zip(active_pairs, result.x))
+
+    # --- Step 3: The Main Orchestrator Method ---
+    def construct_target_weights(self, timestamp: pd.Timestamp, alpha_signals: dict, beta_signal: float):
+        """
+        The main public method that orchestrates the entire portfolio construction process.
+        """
         final_weights = defaultdict(float)
 
-        # 1. Size the Alpha (Pairs Trading) Component using Risk Parity (Inverse Volatility)
-        # For simplicity, we'll equally weight the active signals for now.
-        active_alpha_signals = {p: s for p, s in alpha_signals.items() if s != 0}
-        if active_alpha_signals:
-            weight_per_signal = self.alpha_alloc / len(active_alpha_signals)
-            for pair, signal in active_alpha_signals.items():
-                # In a real model, you'd split this weight across the two legs of the pair.
-                # e.g., pair = "BTCUSDT-ETHUSDT"
-                asset1, asset2 = pair.split('-')
-                final_weights[asset1] += weight_per_signal * signal
-                final_weights[asset2] -= weight_per_signal * signal # Assuming hedge ratio of 1
+        # === ALPHA PORTFOLIO CONSTRUCTION ===
+        active_alpha_pairs = [pair for pair, signal in alpha_signals.items() if signal != 0]
+        
+        initial_alpha_weights = self._compute_inverse_volatility_weights(active_alpha_pairs, timestamp)        
+        optimized_pair_weights = self._optimize_alpha_weights(initial_alpha_weights, timestamp)
+        
+        # 3. Scale and decompose the final alpha portfolio
+        for pair, pair_weight in optimized_pair_weights.items():
+            pair_signal = alpha_signals.get(pair, 0)
+            final_pair_weight = self.alpha_alloc * pair_weight * pair_signal
+           
+            # Decompose into asset legs (simplified equal-dollar split)
+            asset1, asset2 = self.pairs_data.loc[pair]['symbol_x'], self.pairs_data.loc[pair]['symbol_y']
+            final_weights[asset1] += final_pair_weight / 2
+            final_weights[asset2] -= final_pair_weight / 2
 
-        # 2. Size the Beta Component
+        # === BETA PORTFOLIO CONSTRUCTION ===
         if beta_signal > 0:
-            beta_weight_per_asset = (self.beta_alloc * beta_signal) / len(self.beta_basket)
+            total_beta_weight = self.beta_alloc * beta_signal
+            beta_weight_per_asset = total_beta_weight / len(self.beta_basket)
             for asset in self.beta_basket:
                 final_weights[asset] += beta_weight_per_asset
-
+                
+        ## Let's NOT trade spreads
+        ## Basically, a dict of different assests (not pair/spread) with adjusted portfolio-weights
         return dict(final_weights)
-    
+
 
 if __name__ == '__main__':
     print('running __portfolio.py__')

@@ -4,43 +4,7 @@
 Risk-Engine: 
 We put constraints (Volume, Liquidity) / Target-Locking / Drawdown exits 
 '''
-
-# class RiskManager:
-#     def __init__(self, risk_params):
-#         self.max_drawdown = risk_params['max_drawdown']
-#         self.max_concentration = risk_params['max_concentration']
-#         self.volatility_target = risk_params['volatility_target']
-
-#     def manage_portfolio(self, ideal_weights, current_portfolio_state):
-#         """
-#         Takes ideal weights and applies risk rules to produce final target weights.
-        
-#         Args:
-#             ideal_weights (dict): The output from the Alpha module.
-#             current_portfolio_state (dict): Contains current equity, P&L, open positions, etc.
-            
-#         Returns:
-#             dict: The final, risk-adjusted target weights.
-#         """
-#         # 1. Check for portfolio-level kill switch
-#         if current_portfolio_state['drawdown'] > self.max_drawdown:
-#             return {}  # Return empty dict, meaning "exit all positions"
-
-#         final_weights = ideal_weights.copy()
-        
-#         # 2. Apply concentration limits
-#         for asset, weight in final_weights.items():
-#             if abs(weight) > self.max_concentration:
-#                 final_weights[asset] = self.max_concentration * (1 if weight > 0 else -1)
-                
-#         # 3. Apply volatility targeting (simplified example)
-#         # This is where you would calculate position sizes based on volatility.
-#         # For now, we'll just use the concentration-capped weights.
-        
-#         # ... more sophisticated logic here ...
-        
-#         return final_weights
-    
+  
 class RiskManager:
     """
     Applies portfolio-level risk constraints to the *total proposed portfolio*,
