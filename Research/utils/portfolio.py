@@ -511,6 +511,12 @@ class SignalPortfolioConstrained:
             'sharpe_ratio': sharpe,
             'max_drawdown': mdd
         }
+   
+     
+##---------------------------------------------------------------------------------------------
+## Generalized Portfolio Framework. (Enforce Beta-Neutrality for Alpha-Exposure + Beta Layering)
+## ---------------------------------------------------------------------------------------------
+    
     
 class PortfolioConstructor:
     """
