@@ -20,6 +20,7 @@ class PerpetualFuturesBacktester:
         self.initial_capital = initial_capital
         self.fees = fee_config  # e.g., {'maker': 0.00018, 'taker': 0.00045}
         self.execution_fee = self.fees['taker'] # Assume worst-case execution for backtesting
+        self.trade_flag = False
 
     def run(self, 
             history_data: pd.DataFrame, 
@@ -44,10 +45,11 @@ class PerpetualFuturesBacktester:
             "drawdown": 0.0
         }
         
-        equity_curve = pd.Series(index=history_data.index, dtype=float)
+        tmp_token = history_data.index[0][0]
+        equity_curve = pd.Series(index=history_data.loc[tmp_token].index, dtype=float)
         equity_curve.iloc[0] = self.initial_capital
 
-        rn = random.randint(0, len(history_data) - 1)
+        rn = random.randint(2, len(equity_curve) - 1)
         
         print('Backtesting ...')
         print('start-timestamp: ', history_data.index[rn][-1])
@@ -56,9 +58,9 @@ class PerpetualFuturesBacktester:
         alpha_signals, beta_signal = {}, 0
         
         # --- Main Backtesting Loop ---
-        for i in range(rn, len(history_data.index)):
-            timestamp = history_data.index[i][-1]
-            prev_timestamp = history_data.index[i-1][-1]
+        for i in range(rn, len(equity_curve)):
+            timestamp = equity_curve.index[i]
+            prev_timestamp = equity_curve.index[i-1]
             
             current_equity = portfolio_state['equity']
             pnl_from_price_change = 0.0
@@ -101,7 +103,10 @@ class PerpetualFuturesBacktester:
             # --- Orchestration: Get Final Target Weights ---
             # The orchestrator function calls alpha, beta, constructor, and risk modules
             final_target_weights, alpha_signals, beta_signal = orchestrator(timestamp, portfolio_state, alpha_signals, beta_signal)
-
+            
+            if set(list(alpha_signals.values())) != (0) and beta_signal != 0:
+                self.trade_flag = True 
+            
             # --- Rebalancing Logic ---
             # 3. Determine trades needed to rebalance to final_target_weights
             for asset in set(list(portfolio_state['positions'].keys()) + list(final_target_weights.keys())):
@@ -126,8 +131,11 @@ class PerpetualFuturesBacktester:
                         portfolio_state['positions'][asset] = {'size': target_size, 'value': target_value}
 
             # 5. Update equity with fees and save the final value for the day
-            current_equity -= total_fees
+            if self.trade_flag:
+                current_equity -= total_fees
+            
             portfolio_state['equity'] = current_equity
             equity_curve.iloc[i] = current_equity
-
+        
+        equity_curve= equity_curve.fillna(self.initial_capital)
         return equity_curve
