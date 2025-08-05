@@ -10,7 +10,7 @@ class PortfolioAnalytics:
     Calculates and visualizes portfolio performance metrics based on an equity curve.
     This class is strategy-agnostic.
     """
-    def __init__(self, equity_curve: pd.Series, periods_per_year: int = 252):
+    def __init__(self, equity_curve, market_data, periods_per_year):
         """
         Args:
             equity_curve: A pandas Series representing the portfolio value over time.
@@ -21,7 +21,11 @@ class PortfolioAnalytics:
             raise ValueError("Equity curve must not be empty and must have at least two data points.")
             
         self.equity_curve = equity_curve.dropna()
+        self.market_data = market_data.dropna()
+        
         self.returns = self.equity_curve.pct_change().dropna()
+        self.market_returns = self.market_data.pct_change().dropna()
+       
         self.periods_per_year = periods_per_year
 
     def calculate_sharpe_ratio(self, risk_free_rate: float = 0.0):
@@ -55,10 +59,10 @@ class PortfolioAnalytics:
         num_years = len(self.equity_curve) / self.periods_per_year
         return (end_value / start_value) ** (1 / num_years) - 1
 
-    def calculate_beta_and_alpha(self, market_returns: pd.Series):
+    def calculate_beta_and_alpha(self):
         """Calculates the portfolio's beta and annualized alpha against a market benchmark."""
         # Align the portfolio returns with the market returns
-        df = pd.concat([self.returns, market_returns], axis=1).dropna()
+        df = pd.concat([self.returns, self.market_returns], axis=1).dropna()
         
         X = df.iloc[:, 1].values.reshape(-1, 1) # Market returns
         y = df.iloc[:, 0].values                # Portfolio returns
@@ -72,36 +76,55 @@ class PortfolioAnalytics:
         
         return beta, annualized_alpha
 
-    def display_summary(self, market_returns: pd.Series = None):
+    def display_summary(self, is_ensmb=False):
         """Prints a comprehensive summary of key performance metrics."""
         sharpe = self.calculate_sharpe_ratio()
         sortino = self.calculate_sortino_ratio()
         mdd = self.calculate_max_drawdown()
         cagr = self.calculate_cagr()
+
+        if not is_ensmb:
         
-        print("--- Performance Summary ---")
-        print(f"Start Date: {self.equity_curve.index[0].strftime('%Y-%m-%d')}")
-        print(f"End Date: {self.equity_curve.index[-1].strftime('%Y-%m-%d')}")
-        print(f"Final Portfolio Value: ${self.equity_curve.iloc[-1]:,.2f}")
-        print("-" * 27)
-        print(f"Compound Annual Growth Rate (CAGR): {cagr:.2%}")
-        print(f"Annualized Sharpe Ratio: {sharpe:.2f}")
-        print(f"Annualized Sortino Ratio: {sortino:.2f}")
-        print(f"Maximum Drawdown: {mdd:.2%}")
-
-        if market_returns is not None:
-            beta, alpha = self.calculate_beta_and_alpha(market_returns)
+            print("--- Performance Summary ---")
+            # print(f"Start Date: {self.equity_curve.index[0].strftime('%Y-%m-%d')}")
+            # print(f"End Date: {self.equity_curve.index[-1].strftime('%Y-%m-%d')}")
+            print(f"Final Portfolio Value: ${self.equity_curve.iloc[-1]:,.2f}")
             print("-" * 27)
-            print(f"Market Beta: {beta:.2f}")
-            print(f"Annualized Alpha: {alpha:.2%}")
+            print(f"Compound Annual Growth Rate (CAGR): {cagr:.2%}")
+            print(f"Annualized Sharpe Ratio: {sharpe:.2f}")
+            print(f"Annualized Sortino Ratio: {sortino:.2f}")
+            print(f"Maximum Drawdown: {mdd:.2%}")
 
-        print("---------------------------")
-        self.plot_equity_curve()
+            if self.market_returns is not None:
+                beta, alpha = self.calculate_beta_and_alpha()
+                print("-" * 27)
+                print(f"Market Beta: {beta:.2f}")
+                print(f"Annualized Alpha: {alpha:.2%}")
+
+            print("---------------------------")
+            self.plot_equity_curve()
+        
+        else:
+            _ensmb_dict = {
+                'port_value': self.equity_curve.iloc[-1],
+                'sharpe_ratio': sharpe,
+                'sortino_ratio': sortino,
+                'max_drawdown': mdd,
+                'annualizd_compound_return': cagr
+            }
+            
+            if self.market_returns is not None:
+                beta, alpha = self.calculate_beta_and_alpha()
+                _ensmb_dict['beta'] = beta
+                _ensmb_dict['ann_alpha'] = alpha
+
+            return _ensmb_dict
+            
 
     def plot_equity_curve(self):
         """Plots the portfolio value over time."""
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax = plt.subplots(figsize=(12, 6))
+        fig, ax = plt.subplots(figsize=(10, 4))
         
         self.equity_curve.plot(ax=ax, label='Portfolio Equity')
         
@@ -123,7 +146,7 @@ class PortfolioAnalytics:
         )
         
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax = plt.subplots(figsize=(12, 6))
+        fig, ax = plt.subplots(figsize=(10, 4))
         
         rolling_sharpe.plot(ax=ax, label=f'{window}-Period Rolling Sharpe')
         ax.axhline(0, color='grey', linestyle='--')
