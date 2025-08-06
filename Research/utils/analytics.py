@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
 
+### NEED: VaR and CVaR
 class PortfolioAnalytics:
     """
     Calculates and visualizes portfolio performance metrics based on an equity curve.
