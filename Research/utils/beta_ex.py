@@ -56,7 +56,8 @@ class SimpleMarketBeta:
         # --- State Machine Logic (Refactored for clarity and correctness) ---
 
         # === CHECKING FOR EXITS FIRST (HIGHEST PRIORITY) ===
-        is_choppy = (abs(exit_fast_ma_value - exit_slow_ma_value) / exit_slow_ma_value) < 0.02
+        ## 2% consolidation-period
+        is_choppy = (abs(exit_fast_ma_value - exit_slow_ma_value) / exit_slow_ma_value) < 0.005
         
         if prev_signal == 1: # If we are currently LONG
             # Exit if the fast MA crosses below the slow MA OR if the market becomes choppy

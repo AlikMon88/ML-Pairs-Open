@@ -707,6 +707,7 @@ class PortfolioConstructor:
             for asset in self.beta_basket:
                 final_weights[asset] += beta_weight_per_asset
                 
+        # print('timestamp/beta-signal/ideal-port-weights: ', timestamp, beta_signal, final_weights)
         ## Let's NOT trade spreads
         ## Basically, a dict of different assests (not pair/spread) with adjusted portfolio-weights
         return dict(final_weights)

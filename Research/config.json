@@ -15,11 +15,22 @@
     "alpha": {
       "past_window": 60
     },
+    "beta": {
+      "market_regime_fast":40,
+      "market_regime_slow":250, 
+      "exit_fast_ma_period":15, 
+      "exit_slow_ma_period":30
+    },
     "optimizer": {
       "max_leverage_alpha": 1.0,
       "target_beta": 0.0,
       "max_adv_fraction": 0.025,
       "optimizer_method": "SLSQP"
+    },
+    "risk": {
+      "max_leverage_port": 1.0,
+      "max_concentration": 0.4,
+      "max_drawdown": 0.10 
     },
     "strategy": {
       "alpha_allocation": 0.7,

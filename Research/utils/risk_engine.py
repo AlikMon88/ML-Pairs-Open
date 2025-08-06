@@ -28,7 +28,10 @@ class RiskManager:
             dict: The final, risk-approved target weights for the entire portfolio.
         """
         
+        # print('Drawdown: ', portfolio_state['drawdown'])
+        
         # Rule 1: Max Drawdown "Kill Switch" - This rule is stateful and correct as is.
+        # At Kill-Switch max-drawdown we expire the strategy (No-More trade)
         if portfolio_state.get('drawdown', 0) > self.max_drawdown:
             # Generate zero-weight targets for ALL existing positions to signal a full exit.
             all_assets_to_close = list(portfolio_state.get('positions', {}).keys())
@@ -62,4 +65,5 @@ class RiskManager:
             scaling_factor = self.max_leverage / total_leverage
             final_weights = {asset: w * scaling_factor for asset, w in final_weights.items()}
             
+        # print('hedged-port-weights: ', final_weights)
         return final_weights
